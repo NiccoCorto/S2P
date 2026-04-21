@@ -1,0 +1,7 @@
+mio_ambiente/
+env_niccotesi/
+__pycache__/
+*.npy
+*.wav
+*.mp4
+*.pth
