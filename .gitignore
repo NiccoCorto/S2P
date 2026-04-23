@@ -1,7 +1,11 @@
-mio_ambiente/
 env_niccotesi/
 __pycache__/
 *.npy
 *.wav
 *.mp4
 *.pth
+ScanTalk/
+hf_cache/
+scantalk_env/
+Results/
+Saves/
