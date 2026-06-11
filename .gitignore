@@ -9,3 +9,12 @@ hf_cache/
 scantalk_env/
 Results/
 Saves/
+Logs/
+test_data/
+test_Saves/
+test_Results/
+test_Logs/
+Demo_Finale/
+scantalk_output/
+*.pkl
+test_local.py
