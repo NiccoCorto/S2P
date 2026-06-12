@@ -1,20 +1,45 @@
-env_niccotesi/
+# ==========================================
+# 1. FILE TEMPORANEI E CACHE DI PYTHON
+# ==========================================
 __pycache__/
+*.pyc
+.DS_Store
+.ipynb_checkpoints/
+
+# ==========================================
+# 2. ESTENSIONI PESANTI (AUDIO, VIDEO, PESI)
+# Evita di pushare file multimediali o checkpoint
+# ==========================================
 *.npy
 *.wav
 *.mp4
 *.pth
-ScanTalk/
-hf_cache/
-scantalk_env/
-Results/
+*.pkl
+
+# ==========================================
+# 3. CARTELLE DI OUTPUT DI S2P (DATI REALI)
+# Ignorate per non intasare GitHub con i risultati
+# ==========================================
 Saves/
+Results/
 Logs/
+
+# ==========================================
+# 4. AMBIENTI DI TEST LOCALE (DATI SINTETICI)
+# ==========================================
 test_data/
 test_Saves/
 test_Results/
 test_Logs/
-Demo_Finale/
+# test_local.py 
+
+# ==========================================
+# 5. RETROCOMPATIBILITÀ E SICUREZZA
+# Queste cartelle ora sono FUORI da S2P
+# ==========================================
+ScanTalk/
 scantalk_output/
-*.pkl
-test_local.py
+hf_cache/
+env_niccotesi/
+scantalk_env/
+Demo_Finale/
