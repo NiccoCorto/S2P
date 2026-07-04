@@ -122,7 +122,7 @@ def apply_rotations(meshes_or_vertices, rotations, output_dir, mesh_faces=None,
 
         # Perno di rotazione:
         # - FLAME: l'origine (0,0,0) è posizionata al perno anatomico (base cranio/collo)
-        #   → ruotare attorno all'origine produce un movimento naturale della testa
+        #   ruotare attorno all'origine produce un movimento naturale della testa
         # - Se pivot_origin=False: usa il baricentro (solo per mesh non-FLAME)
         if pivot_origin:
             t_center = np.zeros(3)

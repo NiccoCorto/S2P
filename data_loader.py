@@ -122,7 +122,7 @@ def read_data(args):
         print(f"  Saltati {skipped} file (mancanti o con errori)")
 
     if len(data_dict) == 0:
-        raise RuntimeError("Nessun dato valido caricato! Controlla i percorsi.")
+        raise RuntimeError("Nessun dato valido caricato. Controlla i percorsi.")
 
     # --- LOGICA DI SPLIT (Come S2L): split per soggetto ---
     # Estraiamo tutti i soggetti unici dai nomi dei file (es. M003, M012, ecc.)
@@ -139,7 +139,7 @@ def read_data(args):
         "test": subjects[n_train + n_val:]
     }
 
-    print(f"  Split soggetti → Train: {subjects_dict['train']}, "
+    print(f"  Split soggetti Train: {subjects_dict['train']}, "
           f"Val: {subjects_dict['val']}, Test: {subjects_dict['test']}")
 
     # Assegniamo i file alle liste corrette in base al soggetto
@@ -152,7 +152,7 @@ def read_data(args):
         elif subject_id in subjects_dict["test"]:
             test_data.append(v)
 
-    print(f"\nDati caricati — Train: {len(train_data)}, "
+    print(f"\nDati caricati Train: {len(train_data)}, "
           f"Validation: {len(valid_data)}, Test: {len(test_data)}")
 
     # --- Diagnostica shape ---
@@ -182,7 +182,7 @@ def get_dataloaders(args):
         args: Namespace con batch_size e tutti i parametri di read_data.
     
     Returns:
-        dict con chiavi "train", "valid", "test" → DataLoader
+        dict con chiavi "train", "valid", "test" DataLoader
     """
     dataset = {}
     train_data, valid_data, test_data, subjects_dict = read_data(args)
@@ -220,7 +220,7 @@ if __name__ == "__main__":
 
     # Verifichiamo cosa c'è dentro il loader di Train
     for batch_audio, batch_pose, names in loaders["train"]:
-        print(f"\n--- PRIMO BATCH ESTRATTO DAL DATALOADER (TRAIN) ---")
+        print(f"\n PRIMO BATCH ESTRATTO DAL DATALOADER (TRAIN)")
         print(f"File processato: {names[0]}")
         print(f"Shape Tensor Audio: {batch_audio.shape}")
         print(f"Shape Tensor Pose:  {batch_pose.shape}")

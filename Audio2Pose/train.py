@@ -140,7 +140,7 @@ def trainer(args, train_loader, dev_loader, model, optimizer, criterion, schedul
         scheduler.step(val_loss)
         new_lr = optimizer.param_groups[0]["lr"]
         if new_lr != current_lr:
-            print(f"  📉 LR ridotto: {current_lr:.2e} → {new_lr:.2e}")
+            print(f"LR ridotto: {current_lr:.2e} → {new_lr:.2e}")
 
         # --- Best Model & Early Stopping ---
         is_best = val_loss < best_val_loss
@@ -169,7 +169,7 @@ def trainer(args, train_loader, dev_loader, model, optimizer, criterion, schedul
 
         # Early stopping
         if patience_counter >= args.patience:
-            print(f"\n⏹  Early stopping! Nessun miglioramento per {args.patience} epoche.")
+            print(f"\n Early stopping. Nessun miglioramento per {args.patience} epoche.")
             print(f"   Miglior Val Loss: {best_val_loss:.6f}")
             break
 
@@ -177,7 +177,7 @@ def trainer(args, train_loader, dev_loader, model, optimizer, criterion, schedul
     torch.save(model.state_dict(),
                os.path.join(save_path, f"audio2pose_final_epoch_{e+1}.pth"))
 
-    print(f"\n✅ Training completato!")
+    print(f"\n Training completato!")
     print(f"   Miglior modello: {os.path.join(save_path, 'best_audio2pose.pth')}")
     print(f"   Log training:    {csv_path}")
 
@@ -216,13 +216,13 @@ def test(args, model, test_loader):
         save_name = os.path.join(result_path, file_name[0].replace(".wav", ".npy"))
         np.save(save_name, predictions.detach().cpu().numpy())
 
-    print(f"\n✅ Test completato! Pose generate salvate in: {result_path}")
+    print(f"\n Test completato! Pose generate salvate in: {result_path}")
 
 
 def main():
     args = get_args()
 
-    print(f"\n🧠 S2P — Speech-to-Pose")
+    print(f"\n S2P — Speech-to-Pose")
     print(f"   Modalità: {args.mode}")
     print(f"   Device:   {args.device}")
     print(f"   Dati:     {args.data_dir}\n")
