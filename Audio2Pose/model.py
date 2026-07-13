@@ -25,10 +25,15 @@ class HeadPosePredictor(nn.Module):
         num_layers = getattr(args, "num_layers", 2) if args else 2
         dropout = getattr(args, "dropout", 0.2) if args else 0.2
 
-        # 1. Audio Encoder (Wav2Vec2) — pesi congelati
+        # 1. Audio Encoder (Wav2Vec2) — partial fine-tuning come ScanTalk/HuBERT
+        # Congela solo il CNN feature extractor; scongela gli ultimi 4 transformer blocks
         self.audio_encoder = Wav2Vec2Model.from_pretrained("facebook/wav2vec2-base-960h")
-        for param in self.audio_encoder.parameters():
-            param.requires_grad = False
+        self.audio_encoder.feature_extractor._freeze_parameters()
+        n_layers = len(self.audio_encoder.encoder.layers)
+        for i, layer in enumerate(self.audio_encoder.encoder.layers):
+            requires_grad = (i >= n_layers - 4)
+            for param in layer.parameters():
+                param.requires_grad = requires_grad
 
         # 2. Layer Normalization sull'input (stabilizza il training)
         self.layer_norm = nn.LayerNorm(768)

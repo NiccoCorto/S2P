@@ -46,6 +46,8 @@ def read_data(args):
         train_data, valid_data, test_data, subjects_dict
     """
     # --- Cache: se esiste e richiesta, carica da file ---
+    # ATTENZIONE: cancellare s2p_cache.pkl dopo ogni modifica al preprocessing
+    # (es. dopo il fix di allineamento audio/pose del 2026-07-13)
     cache_file = os.path.join(args.data_dir, "s2p_cache.pkl")
     if args.cache_data and os.path.exists(cache_file):
         print(f"Caricamento dati da cache: {cache_file}")
@@ -92,10 +94,6 @@ def read_data(args):
         try:
             # Carica audio e porta a 16000Hz
             speech_array, sampling_rate = librosa.load(wav_file, sr=16000)
-            # Estrai le features con Wav2Vec2
-            input_values = np.squeeze(
-                processor(speech_array, sampling_rate=16000).input_values
-            )
 
             # Carica i 3 angoli di rotazione per frame
             pose_data = np.load(npy_file, allow_pickle=True)
@@ -105,6 +103,17 @@ def read_data(args):
                 print(f"  [WARN] Shape inattesa per {f}: {pose_data.shape}, skip")
                 skipped += 1
                 continue
+
+            # --- FIX: Allineamento temporale audio ↔ pose ---
+            # Le pose sono a 30 FPS. Trimmiamo l'audio alla durata esatta
+            # per ridurre il disallineamento prima dell'interpolazione nel modello.
+            expected_samples = int(pose_data.shape[0] / 30.0 * 16000)
+            speech_array = speech_array[:expected_samples]
+
+            # Estrai le features con Wav2Vec2
+            input_values = np.squeeze(
+                processor(speech_array, sampling_rate=16000).input_values
+            )
 
             # Chiave del dizionario (es. M003_angry_1_001)
             key = f.replace(".wav", "")
