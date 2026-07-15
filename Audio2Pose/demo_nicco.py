@@ -106,6 +106,8 @@ def apply_rotations(meshes_or_vertices, rotations, output_dir, mesh_faces=None,
 
     print(f"\nApplicazione rotazioni della testa a {min_frames} frame...")
 
+    animated_vertices_list = []
+
     for i in tqdm(range(min_frames), desc="Rotazione"):
         item = meshes_or_vertices[i]
 
@@ -145,6 +147,14 @@ def apply_rotations(meshes_or_vertices, rotations, output_dir, mesh_faces=None,
 
         output_filepath = os.path.join(output_dir, f"frame_{i:05d}.ply")
         rotated_mesh.export(output_filepath)
+        
+        animated_vertices_list.append(rotated_vertices)
+
+    # Salva il file .npy completo per poterlo usare con render_npy.py
+    npy_output_path = os.path.join(output_dir, "mesh_animata.npy")
+    np.array_to_save = np.array(animated_vertices_list)
+    np.save(npy_output_path, np.array_to_save)
+    print(f"   [INFO] Vertici animati salvati in: {npy_output_path} (shape: {np.array_to_save.shape})")
 
     return min_frames
 
