@@ -127,7 +127,7 @@ def plot_training_curves(csv_path, output_path=None):
             matplotlib.use('Agg')  # Backend non interattivo per salvare
         import matplotlib.pyplot as plt
     except ImportError:
-        print("[WARN] matplotlib non installato, impossibile plottare")
+        print(" matplotlib non installato, impossibile plottare")
         return
 
     epochs = []
@@ -174,7 +174,7 @@ if __name__ == "__main__":
 
     if cli_args.action == "plot":
         if not cli_args.csv:
-            print("Serve --csv per plottare!")
+            print("necessario --csv per plottare...")
         else:
             plot_training_curves(cli_args.csv, cli_args.output)
 

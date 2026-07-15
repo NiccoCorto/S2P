@@ -40,19 +40,19 @@ def get_args():
                         help="Dimensione hidden LSTM")
     parser.add_argument("--num_layers", type=int, default=2,
                         help="Numero di layer LSTM")
-    parser.add_argument("--dropout", type=float, default=0.2,
+    parser.add_argument("--dropout", type=float, default=0.4,
                         help="Dropout tra LSTM e FC")
 
     # === Iperparametri Training ===
-    parser.add_argument("--lr", type=float, default=0.0001,
+    parser.add_argument("--lr", type=float, default=0.00005,
                         help="Learning rate iniziale")
     parser.add_argument("--max_epoch", type=int, default=100,
                         help="Numero massimo di epoche")
     parser.add_argument("--batch_size", type=int, default=1,
                         help="Batch size (1 perché sequenze di lunghezza variabile)")
-    parser.add_argument("--patience", type=int, default=15,
+    parser.add_argument("--patience", type=int, default=20,
                         help="Epoche senza miglioramento prima di early stopping")
-    parser.add_argument("--vel_loss_weight", type=float, default=2.0,
+    parser.add_argument("--vel_loss_weight", type=float, default=8.0,
                         help="Peso della velocity loss rispetto alla position loss")
 
     # === Dati ===

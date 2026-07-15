@@ -75,7 +75,7 @@ def evaluate_results(results_dir, gt_dir, output_csv=None):
         gt_path = os.path.join(gt_dir, f)
 
         if not os.path.exists(gt_path):
-            print(f"  [WARN] GT non trovato per {f}, skip")
+            print(f"  GT non trovato per {f}, skip")
             continue
 
         pred = np.load(pred_path)

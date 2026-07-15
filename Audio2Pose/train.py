@@ -59,7 +59,7 @@ def log_epoch(csv_path, epoch, train_loss, val_loss, lr, is_best):
     with open(csv_path, "a", newline="") as f:
         writer = csv.writer(f)
         writer.writerow([epoch, f"{train_loss:.8f}", f"{val_loss:.8f}",
-                         f"{lr:.8f}", "★" if is_best else ""])
+                         f"{lr:.8f}", "best" if is_best else ""])
 
 
 def trainer(args, train_loader, dev_loader, model, optimizer, criterion, scheduler):
@@ -140,7 +140,7 @@ def trainer(args, train_loader, dev_loader, model, optimizer, criterion, schedul
         scheduler.step(val_loss)
         new_lr = optimizer.param_groups[0]["lr"]
         if new_lr != current_lr:
-            print(f"LR ridotto: {current_lr:.2e} → {new_lr:.2e}")
+            print(f"LR ridotto: {current_lr:.2e} , {new_lr:.2e}")
 
         # --- Best Model & Early Stopping ---
         is_best = val_loss < best_val_loss
@@ -156,14 +156,14 @@ def trainer(args, train_loader, dev_loader, model, optimizer, criterion, schedul
         log_epoch(csv_path, e + 1, train_loss, val_loss, new_lr, is_best)
 
         # Print riepilogo epoca
-        best_marker = " ★ BEST" if is_best else ""
+        best_marker = "BEST" if is_best else ""
         print(f"  Epoca {e+1}/{args.max_epoch} | "
               f"Train: {train_loss:.6f} | Val: {val_loss:.6f} | "
               f"LR: {new_lr:.2e} | "
               f"Patience: {patience_counter}/{args.patience}{best_marker}")
 
         # Salva checkpoint periodici
-        if (e + 1) % 50 == 0:
+        if (e + 1) % 5 == 0:
             torch.save(model.state_dict(),
                        os.path.join(save_path, f"audio2pose_epoch_{e+1}.pth"))
 

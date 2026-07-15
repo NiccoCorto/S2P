@@ -8,8 +8,8 @@ e vi applica le rotazioni della testa predette dal modello Audio2Pose.
   2. --audio + --scantalk_dir      → Pipeline end-to-end: audio → predici pose → applica
   3. --pose_file + --vertices_npy  → Applica pose a vertici salvati come .npy (N_frames, V, 3)
 
-NOTA ROTAZIONE: Le mesh FLAME (usate da ScanTalk) hanno l'origine (0,0,0) posizionata
-al perno anatomico del collo. La rotazione viene applicata attorno all'origine, NON
+NOTA ROTAZIONE: Le mesh FLAME di ScanTalk hanno l'origine (0,0,0) posizionata
+al perno anatomico del collo. La rotazione viene applicata attorno all'origine e non
 al baricentro dei vertici, per ottenere un movimento naturale della testa.
 """
 import os
@@ -101,8 +101,8 @@ def apply_rotations(meshes_or_vertices, rotations, output_dir, mesh_faces=None,
     min_frames = min(n_meshes, n_poses)
 
     if n_meshes != n_poses:
-        print(f"  [INFO] Allineamento: {n_meshes} mesh, {n_poses} frame di posa "
-              f"→ uso {min_frames} frame")
+        print(f" Allineamento: {n_meshes} mesh, {n_poses} frame di posa "
+              f" uso {min_frames} frame")
 
     print(f"\nApplicazione rotazioni della testa a {min_frames} frame...")
 
@@ -163,7 +163,7 @@ def render_video(meshes_dir, output_video, fps=30):
     try:
         import pyrender
     except ImportError:
-        print("[WARN] pyrender non installato, video non generato")
+        print(" pyrender non installato, video non generato")
         print("       Installa con: pip install pyrender")
         return
 
@@ -233,7 +233,7 @@ Esempi di utilizzo:
   # Pipeline end-to-end: da audio a mesh ruotate
   python demo_nicco.py --audio test.wav --scantalk_dir scantalk_output --checkpoint Saves/best_audio2pose.pth
 
-  # Applica pose a vertici .npy (formato alternativo)
+  # Applica pose a vertici .npy 
   python demo_nicco.py --pose_file Results/M034_disgusted_2_001.npy --vertices_npy scantalk_vertices.npy
         """
     )
@@ -273,12 +273,12 @@ Esempi di utilizzo:
 
     # --- 1. Ottieni le rotazioni ---
     if args.pose_file:
-        print(f"\n📐 Caricamento pose da: {args.pose_file}")
+        print(f"\n Caricamento pose da: {args.pose_file}")
         rotations = np.load(args.pose_file)
         print(f"   Shape: {rotations.shape}")
     else:
         # Modalità end-to-end: predici le pose dall'audio
-        print(f"\n🎤 Modalità end-to-end: predizione pose da audio")
+        print(f"\n Modalità end-to-end: predizione pose da audio")
         print(f"   Audio: {args.audio}")
 
         from utils import predict_pose_from_audio
@@ -319,7 +319,7 @@ Esempi di utilizzo:
         items, rotations, args.output_dir, mesh_faces=mesh_faces
     )
 
-    print(f"\n🎉 Cerchio completato! {n_processed} mesh finali (Labbra + Testa) "
+    print(f"\n Cerchio completato! {n_processed} mesh finali (Labbra + Testa) "
           f"salvate in: {args.output_dir}")
 
     # --- 4. Rendering video (opzionale) ---
