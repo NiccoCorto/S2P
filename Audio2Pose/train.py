@@ -8,11 +8,12 @@ import csv
 import os
 import sys
 
+import comet_ml
 import torch
 import torch.nn as nn
 from tqdm import tqdm
 
-# Aggiungiamo la cartella principale al path per trovare il dataloader e config
+# aggiungi la cartella principale al path per trovare il dataloader e config
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from data_loader import get_dataloaders
 from config import get_args
@@ -31,16 +32,16 @@ class PoseLoss(nn.Module):
         self.vel_weight = vel_weight
 
     def forward(self, predictions, target):
-        # 1. Errore di posizione (quanto siamo lontani dagli angoli reali)
+        # errore di posizione (quanto siamo lontani dagli angoli reali)
         pos_loss = self.mse(predictions, target)
 
-        # 2. Errore di velocità (differenza tra il frame attuale e il precedente)
-        # Questo costringe il modello a non fare movimenti "a scatti"
+        # errore di velocità (differenza tra il frame attuale e il precedente)
+        # questo costringe il modello a non fare movimenti "a scatti"
         prediction_shift = predictions[:, 1:, :] - predictions[:, :-1, :]
         target_shift = target[:, 1:, :] - target[:, :-1, :]
         vel_loss = self.mse(prediction_shift, target_shift)
 
-        # Sommiamo gli errori (diamo più peso alla velocità per movimenti fluidi)
+        # sommiamo gli errori (diamo più peso alla velocità per movimenti fluidi)
         return pos_loss + (self.vel_weight * vel_loss)
 
 
@@ -62,7 +63,7 @@ def log_epoch(csv_path, epoch, train_loss, val_loss, lr, is_best):
                          f"{lr:.8f}", "best" if is_best else ""])
 
 
-def trainer(args, train_loader, dev_loader, model, optimizer, criterion, scheduler):
+def trainer(args, train_loader, dev_loader, model, optimizer, criterion, scheduler, experiment):
     """Loop di addestramento con early stopping e best model saving."""
     save_path = args.save_path
     os.makedirs(save_path, exist_ok=True)
@@ -86,7 +87,7 @@ def trainer(args, train_loader, dev_loader, model, optimizer, criterion, schedul
     for e in range(args.max_epoch):
         loss_log = []
 
-        # --- FASE DI TRAINING ---
+        # fase di training
         model.train()
         pbar = tqdm(enumerate(train_loader), total=len(train_loader),
                     desc=f"Epoch {e+1}/{args.max_epoch} [TRAIN]")
@@ -97,10 +98,10 @@ def trainer(args, train_loader, dev_loader, model, optimizer, criterion, schedul
 
             optimizer.zero_grad()
 
-            # Passiamo la lunghezza reale delle pose al modello
+            # passiamo la lunghezza reale delle pose al modello
             predictions = model(audio, target_seq_len=pose_target.size(1))
 
-            # Allinea la lunghezza (a volte differiscono di 1 frame)
+            # allinea la lunghezza (a volte differiscono di 1 frame)
             min_seq_len = min(predictions.size(1), pose_target.size(1))
             predictions = predictions[:, :min_seq_len, :]
             pose_target_aligned = pose_target[:, :min_seq_len, :]
@@ -114,7 +115,7 @@ def trainer(args, train_loader, dev_loader, model, optimizer, criterion, schedul
 
         train_loss = np.mean(loss_log)
 
-        # --- FASE DI VALIDATION ---
+        # fase di validation
         valid_loss_log = []
         model.eval()
 
@@ -123,7 +124,7 @@ def trainer(args, train_loader, dev_loader, model, optimizer, criterion, schedul
                 audio = audio.to(device=args.device)
                 pose_target = pose_target.to(device=args.device)
 
-                # FIX: passare target_seq_len anche in validation!
+                # passare target_seq_len anche in validation
                 predictions = model(audio, target_seq_len=pose_target.size(1))
 
                 min_seq_len = min(predictions.size(1), pose_target.size(1))
@@ -135,14 +136,14 @@ def trainer(args, train_loader, dev_loader, model, optimizer, criterion, schedul
 
         val_loss = np.mean(valid_loss_log) if valid_loss_log else float("inf")
 
-        # --- Learning Rate Scheduler ---
+        # learning rate scheduler
         current_lr = optimizer.param_groups[0]["lr"]
         scheduler.step(val_loss)
         new_lr = optimizer.param_groups[0]["lr"]
         if new_lr != current_lr:
             print(f"LR ridotto: {current_lr:.2e} , {new_lr:.2e}")
 
-        # --- Best Model & Early Stopping ---
+        # best model & early stopping
         is_best = val_loss < best_val_loss
         if is_best:
             best_val_loss = val_loss
@@ -154,26 +155,31 @@ def trainer(args, train_loader, dev_loader, model, optimizer, criterion, schedul
 
         # Log
         log_epoch(csv_path, e + 1, train_loss, val_loss, new_lr, is_best)
+        experiment.log_metrics({
+            "train_loss": train_loss,
+            "val_loss": val_loss,
+            "learning_rate": new_lr
+        }, step=e + 1)
 
-        # Print riepilogo epoca
+        # print riepilogo epoca
         best_marker = "BEST" if is_best else ""
         print(f"  Epoca {e+1}/{args.max_epoch} | "
               f"Train: {train_loss:.6f} | Val: {val_loss:.6f} | "
               f"LR: {new_lr:.2e} | "
               f"Patience: {patience_counter}/{args.patience}{best_marker}")
 
-        # Salva checkpoint periodici
+        # salva checkpoint periodici
         if (e + 1) % 5 == 0:
             torch.save(model.state_dict(),
                        os.path.join(save_path, f"audio2pose_epoch_{e+1}.pth"))
 
-        # Early stopping
+        # early stopping
         if patience_counter >= args.patience:
             print(f"\n Early stopping. Nessun miglioramento per {args.patience} epoche.")
             print(f"   Miglior Val Loss: {best_val_loss:.6f}")
             break
 
-    # Salva il modello finale
+    # salva il modello finale
     torch.save(model.state_dict(),
                os.path.join(save_path, f"audio2pose_final_epoch_{e+1}.pth"))
 
@@ -222,6 +228,20 @@ def test(args, model, test_loader):
 def main():
     args = get_args()
 
+    # Inizializza Comet ML (l'API key verrà letta dalla variabile d'ambiente COMET_API_KEY)
+    experiment = comet_ml.Experiment(
+        project_name="audio2pose",
+        auto_metric_logging=True,
+        auto_param_logging=True,
+        auto_histogram_weight_logging=True,
+        auto_histogram_gradient_logging=True,
+        auto_histogram_activation_logging=True,
+    )
+    # Rinomina l'esperimento per identificarlo facilmente sulla dashboard
+    experiment.set_name(f"vel_loss_{args.vel_loss_weight}_epochs_{args.max_epoch}")
+    # Logga tutti gli argomenti (iperparametri, path, etc.)
+    experiment.log_parameters(vars(args))
+
     print(f"\n S2P — Speech-to-Pose")
     print(f"   Modalità: {args.mode}")
     print(f"   Device:   {args.device}")
@@ -245,7 +265,7 @@ def main():
 
     # 3. Learning Rate Scheduler
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode="min", factor=0.5, patience=5, verbose=False
+        optimizer, mode="min", factor=0.5, patience=15, verbose=False
     )
 
     # 4. Carica i dati
@@ -253,7 +273,7 @@ def main():
 
     # 5. Training
     model = trainer(args, dataset["train"], dataset["valid"],
-                    model, optimizer, criterion, scheduler)
+                    model, optimizer, criterion, scheduler, experiment)
 
     # 6. Test
     test(args, model, dataset["test"])

@@ -20,13 +20,13 @@ class HeadPosePredictor(nn.Module):
     def __init__(self, args=None):
         super(HeadPosePredictor, self).__init__()
 
-        # Iperparametri (da args o default)
+        # iperparametri (da args o default)
         hidden_dim = getattr(args, "hidden_dim", 256) if args else 256
         num_layers = getattr(args, "num_layers", 2) if args else 2
         dropout = getattr(args, "dropout", 0.2) if args else 0.2
 
-        # 1. Audio Encoder (Wav2Vec2) — partial fine-tuning come ScanTalk/HuBERT
-        # Congela solo il CNN feature extractor; scongela gli ultimi 4 transformer blocks
+        # Audio Encoder (Wav2Vec2) — partial fine-tuning come ScanTalk/HuBERT
+        # congela solo il CNN feature extractor; scongela gli ultimi 4 transformer blocks
         self.audio_encoder = Wav2Vec2Model.from_pretrained("facebook/wav2vec2-base-960h")
         self.audio_encoder.feature_extractor._freeze_parameters()
         n_layers = len(self.audio_encoder.encoder.layers)
@@ -35,10 +35,10 @@ class HeadPosePredictor(nn.Module):
             for param in layer.parameters():
                 param.requires_grad = requires_grad
 
-        # 2. Layer Normalization sull'input (stabilizza il training)
+        # Layer Normalization sull'input (stabilizza il training)
         self.layer_norm = nn.LayerNorm(768)
 
-        # 3. Layer temporale (LSTM bidirezionale)
+        # Layer temporale (LSTM bidirezionale)
         self.lstm = nn.LSTM(
             input_size=768,
             hidden_size=hidden_dim,
@@ -48,10 +48,10 @@ class HeadPosePredictor(nn.Module):
             dropout=dropout if num_layers > 1 else 0.0
         )
 
-        # 4. Dropout prima dell'output
+        # dropout prima dell'output
         self.dropout = nn.Dropout(p=dropout)
 
-        # 5. Output: 3 valori (Pitch, Yaw, Roll) — compatibili con cv2.Rodrigues()
+        # output: 3 valori (Pitch, Yaw, Roll) — compatibili con cv2.Rodrigues()
         self.fc = nn.Linear(hidden_dim * 2, 3)  # *2 perché bidirezionale
 
     def forward(self, audio_input, target_seq_len=None):
@@ -64,15 +64,15 @@ class HeadPosePredictor(nn.Module):
         Returns:
             pose_pred: (Batch, target_seq_len, 3) — Pitch, Yaw, Roll per frame
         """
-        # 1. Estrai le feature dall'audio (escono a ~50 FPS)
+        # estrai le feature dall'audio (escono a ~50 FPS)
         with torch.no_grad():
             features = self.audio_encoder(audio_input).last_hidden_state  # (B, Seq_Audio, 768)
 
-        # 2. Layer Normalization
+        # layer normalization
         features = self.layer_norm(features)
 
-        # 3. Interpolazione Lineare (la "magia di Federico")
-        # Se sappiamo quanti frame ha il video, "stiriamo" l'audio per renderlo identico
+        # interpolazione lineare (la "magia di Federico")
+        # se sappiamo quanti frame ha il video, "stiriamo" l'audio per renderlo identico
         if target_seq_len is not None and features.size(1) != target_seq_len:
             features = features.transpose(1, 2)  # (B, 768, Seq_Audio)
             features = F.interpolate(
@@ -80,13 +80,13 @@ class HeadPosePredictor(nn.Module):
             )
             features = features.transpose(1, 2)  # (B, target_seq_len, 768)
 
-        # 4. LSTM
+        # lstm
         lstm_out, _ = self.lstm(features)
 
-        # 5. Dropout
+        # dropout
         lstm_out = self.dropout(lstm_out)
 
-        # 6. Output: 3 angoli per frame
+        # output: 3 angoli per frame
         pose_pred = self.fc(lstm_out)  # (B, Seq, 3)
 
         return pose_pred

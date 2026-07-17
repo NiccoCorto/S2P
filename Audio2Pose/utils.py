@@ -10,7 +10,7 @@ import cv2
 import librosa
 from transformers import Wav2Vec2Processor
 
-# Aggiungi il path del progetto
+# aggiungi il path del progetto
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
@@ -60,12 +60,12 @@ def predict_pose_from_audio(model, audio_path, device="cpu", target_frames=None)
     """
     processor = Wav2Vec2Processor.from_pretrained("facebook/wav2vec2-base-960h")
 
-    # Carica audio a 16kHz
+    # carica audio a 16kHz
     speech_array, _ = librosa.load(audio_path, sr=16000)
     input_values = processor(speech_array, sampling_rate=16000).input_values
     audio_tensor = torch.FloatTensor(input_values).to(device)
 
-    # Predizione
+    # predizione
     with torch.no_grad():
         predictions = model(audio_tensor, target_seq_len=target_frames)
 
@@ -124,7 +124,7 @@ def plot_training_curves(csv_path, output_path=None):
     try:
         import matplotlib
         if output_path:
-            matplotlib.use('Agg')  # Backend non interattivo per salvare
+            matplotlib.use('Agg')  # backend non interattivo per salvare
         import matplotlib.pyplot as plt
     except ImportError:
         print(" matplotlib non installato, impossibile plottare")

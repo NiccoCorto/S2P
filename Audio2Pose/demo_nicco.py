@@ -35,7 +35,7 @@ def load_scantalk_meshes(scantalk_dir):
     Returns:
         list di trimesh.Trimesh, ordinata per nome
     """
-    # Prova prima nella sottocartella Meshes/ (struttura standard ScanTalk)
+    # cerca mesh nella sottocartella Meshes/ (struttura standard ScanTalk)
     meshes_subdir = os.path.join(scantalk_dir, "Meshes")
     if os.path.isdir(meshes_subdir):
         search_dir = meshes_subdir
@@ -95,7 +95,7 @@ def apply_rotations(meshes_or_vertices, rotations, output_dir, mesh_faces=None,
     """
     os.makedirs(output_dir, exist_ok=True)
 
-    # Allineiamo il numero di frame (prendiamo il minimo tra i due)
+    # allineiamo il numero di frame prendendo il minimo tra i due
     n_meshes = len(meshes_or_vertices)
     n_poses = len(rotations)
     min_frames = min(n_meshes, n_poses)
@@ -111,7 +111,7 @@ def apply_rotations(meshes_or_vertices, rotations, output_dir, mesh_faces=None,
     for i in tqdm(range(min_frames), desc="Rotazione"):
         item = meshes_or_vertices[i]
 
-        # Ottieni i vertici
+        # ottieni i vertici
         if isinstance(item, trimesh.Trimesh):
             vertices = item.vertices.copy()
             faces = item.faces
@@ -119,10 +119,10 @@ def apply_rotations(meshes_or_vertices, rotations, output_dir, mesh_faces=None,
             vertices = item.copy()
             faces = mesh_faces
 
-        # Prendi i 3 angoli per questo frame
+        # prendi i 3 angoli per questo frame
         rot = rotations[i]
 
-        # Perno di rotazione:
+        # perno di rotazione:
         # - FLAME: l'origine (0,0,0) è posizionata al perno anatomico (base cranio/collo)
         #   ruotare attorno all'origine produce un movimento naturale della testa
         # - Se pivot_origin=False: usa il baricentro (solo per mesh non-FLAME)
@@ -131,13 +131,13 @@ def apply_rotations(meshes_or_vertices, rotations, output_dir, mesh_faces=None,
         else:
             t_center = np.mean(vertices, axis=0)
 
-        # Matrice di Rotazione di Rodrigues
+        # matrice di Rotazione di Rodrigues
         R, _ = cv2.Rodrigues(rot.astype(np.float64))
 
-        # Applica la rotazione a tutti i vertici attorno al perno
+        # applica la rotazione a tutti i vertici attorno al perno
         rotated_vertices = R.dot((vertices - t_center).T).T + t_center
 
-        # Crea e salva la nuova mesh
+        # crea e salva la nuova mesh
         if faces is not None:
             rotated_mesh = trimesh.Trimesh(
                 vertices=rotated_vertices, faces=faces, process=False
@@ -150,85 +150,13 @@ def apply_rotations(meshes_or_vertices, rotations, output_dir, mesh_faces=None,
         
         animated_vertices_list.append(rotated_vertices)
 
-    # Salva il file .npy completo per poterlo usare con render_npy.py
+    # salva il file .npy completo per poterlo usare con render_npy.py
     npy_output_path = os.path.join(output_dir, "mesh_animata.npy")
     np.array_to_save = np.array(animated_vertices_list)
     np.save(npy_output_path, np.array_to_save)
-    print(f"   [INFO] Vertici animati salvati in: {npy_output_path} (shape: {np.array_to_save.shape})")
+    print(f"  Vertici animati salvati in: {npy_output_path} (shape: {np.array_to_save.shape})")
 
     return min_frames
-
-
-def render_video(meshes_dir, output_video, fps=30):
-    """Renderizza un video dalle mesh .ply ruotate (opzionale, richiede pyrender).
-    
-    Args:
-        meshes_dir: Cartella con le mesh frame_XXXXX.ply
-        output_video: Path del video di output (.mp4)
-        fps: Framerate del video
-    """
-    # IMPORTANTE: impostare il backend PRIMA di importare pyrender
-    # su server SSH headless (senza schermo fisico) serve EGL o osmesa
-    os.environ['PYOPENGL_PLATFORM'] = 'egl'
-    try:
-        import pyrender
-    except ImportError:
-        print(" pyrender non installato, video non generato")
-        print("       Installa con: pip install pyrender")
-        return
-
-    mesh_files = sorted(glob.glob(os.path.join(meshes_dir, 'frame_*.ply')))
-    if not mesh_files:
-        print("Nessuna mesh trovata per il rendering video")
-        return
-
-    print(f"\nRendering video ({len(mesh_files)} frame a {fps} FPS)...")
-
-    # Prova a usare ffmpeg per assemblare il video
-    frames = []
-    for mf in tqdm(mesh_files, desc="Rendering"):
-        mesh = trimesh.load(mf, process=False)
-
-        # Rendering con pyrender
-        scene = pyrender.Scene(
-            ambient_light=[0.3, 0.3, 0.3],
-            bg_color=[255, 255, 255]
-        )
-        material = pyrender.material.MetallicRoughnessMaterial(
-            alphaMode='BLEND',
-            baseColorFactor=[0.3, 0.3, 0.3, 1.0],
-            metallicFactor=0.8,
-            roughnessFactor=0.8
-        )
-        render_mesh = pyrender.Mesh.from_trimesh(
-            mesh, material=material, smooth=True
-        )
-        scene.add(render_mesh)
-
-        # Camera
-        camera = pyrender.PerspectiveCamera(yfov=np.pi / 3.0)
-        t_center = np.mean(mesh.vertices, axis=0)
-        camera_pose = np.eye(4)
-        camera_pose[:3, 3] = t_center + [0, 0, 0.5]
-        scene.add(camera, pose=camera_pose)
-
-        # Luce
-        light = pyrender.DirectionalLight(color=[1.0, 1.0, 1.0], intensity=2.0)
-        scene.add(light, pose=camera_pose)
-
-        renderer = pyrender.OffscreenRenderer(800, 800)
-        color, _ = renderer.render(scene)
-        frames.append(color)
-        renderer.delete()
-
-    # Scrivi il video con OpenCV
-    h, w = frames[0].shape[:2]
-    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-    out = cv2.VideoWriter(output_video, fourcc, fps, (w, h))
-    for frame in frames:
-        out.write(cv2.cvtColor(frame, cv2.COLOR_RGB2BGR))
-    out.release()
-    print(f"Video salvato: {output_video}")
 
 
 def main():
@@ -248,7 +176,7 @@ Esempi di utilizzo:
         """
     )
 
-    # Input
+    # input
     parser.add_argument("--audio", type=str, default=None,
                         help="File audio .wav (per modalità end-to-end)")
     parser.add_argument("--pose_file", type=str, default=None,
@@ -258,7 +186,7 @@ Esempi di utilizzo:
     parser.add_argument("--vertices_npy", type=str, default=None,
                         help="File .npy con vertici ScanTalk (shape N_frames x V x 3)")
 
-    # Output
+    # output
     parser.add_argument("--output_dir", type=str, default="Demo_Finale",
                         help="Dove salvare le mesh ruotate")
     parser.add_argument("--render_video", action="store_true",
@@ -266,7 +194,7 @@ Esempi di utilizzo:
     parser.add_argument("--fps", type=int, default=30,
                         help="FPS del video di output")
 
-    # Modello (per modalità end-to-end)
+    # modello (per modalità end-to-end)
     parser.add_argument("--checkpoint", type=str, default="Saves/best_audio2pose.pth",
                         help="Path al checkpoint del modello (per --audio)")
     parser.add_argument("--device", type=str,
@@ -274,28 +202,28 @@ Esempi di utilizzo:
 
     args = parser.parse_args()
 
-    # --- Validazione input ---
+    # validaztion di input
     if args.audio is None and args.pose_file is None:
         parser.error("Serve almeno uno tra --audio e --pose_file")
 
     if args.scantalk_dir is None and args.vertices_npy is None:
         parser.error("Serve almeno uno tra --scantalk_dir e --vertices_npy")
 
-    # --- 1. Ottieni le rotazioni ---
+    # prendi le rotazioni
     if args.pose_file:
         print(f"\n Caricamento pose da: {args.pose_file}")
         rotations = np.load(args.pose_file)
         print(f"   Shape: {rotations.shape}")
     else:
-        # Modalità end-to-end: predici le pose dall'audio
-        print(f"\n Modalità end-to-end: predizione pose da audio")
+        # end-to-end mode: predici le pose dall'audio
+        print(f"\n end-to-end mode: predizione pose da audio")
         print(f"   Audio: {args.audio}")
 
         from utils import predict_pose_from_audio
         from model import HeadPosePredictor
         import torch
 
-        # Carica il modello
+        # carica il modello
         model = HeadPosePredictor()
         model.load_state_dict(
             torch.load(args.checkpoint, map_location=args.device)
@@ -308,13 +236,13 @@ Esempi di utilizzo:
         )
         print(f"   Pose predette: {rotations.shape}")
 
-        # Salva le pose predette
+        # salva le pose predette
         pose_save = os.path.join(args.output_dir, "predicted_pose.npy")
         os.makedirs(args.output_dir, exist_ok=True)
         np.save(pose_save, rotations)
         print(f"   Pose salvate in: {pose_save}")
 
-    # --- 2. Carica le mesh/vertici di ScanTalk ---
+    # carica le mesh di scantalk
     mesh_faces = None
     if args.scantalk_dir:
         meshes, mesh_files = load_scantalk_meshes(args.scantalk_dir)
@@ -322,21 +250,15 @@ Esempi di utilizzo:
     else:
         vertex_list = load_vertices_npy(args.vertices_npy)
         items = vertex_list
-        # Per vertici nudi servirebbero le facce — ma salvando come PointCloud funziona
+        # per vertici nudi servirebbero le facce — ma salvando come PointCloud funziona
 
-    # --- 3. Applica le rotazioni ---
+    # applica le rotazioni
     n_processed = apply_rotations(
         items, rotations, args.output_dir, mesh_faces=mesh_faces
     )
 
     print(f"\n Cerchio completato! {n_processed} mesh finali (Labbra + Testa) "
           f"salvate in: {args.output_dir}")
-
-    # --- 4. Rendering video (opzionale) ---
-    if args.render_video:
-        video_path = os.path.join(args.output_dir, "demo_s2p.mp4")
-        render_video(args.output_dir, video_path, fps=args.fps)
-
 
 if __name__ == "__main__":
     main()

@@ -21,7 +21,7 @@ def compute_metrics(pred, gt):
     Returns:
         dict con le metriche calcolate
     """
-    # Allinea le lunghezze
+    # allinea le lunghezze
     min_len = min(len(pred), len(gt))
     pred = pred[:min_len]
     gt = gt[:min_len]
@@ -33,8 +33,8 @@ def compute_metrics(pred, gt):
     mae_per_axis = np.mean(np.abs(pred - gt), axis=0)  # shape (3,)
     mae_total = np.mean(np.abs(pred - gt))
 
-    # Velocity Error — misura la fluidità del movimento
-    # Confronta le "derivate" (velocità frame-to-frame)
+    # velocity error — misura la fluidità del movimento
+    # confronta le "derivate" (velocità frame-to-frame)
     pred_vel = pred[1:] - pred[:-1]
     gt_vel = gt[1:] - gt[:-1]
     vel_error = np.mean(np.abs(pred_vel - gt_vel))
@@ -90,7 +90,7 @@ def evaluate_results(results_dir, gt_dir, output_csv=None):
         print("Nessun file valutato!")
         return None
 
-    # --- Metriche aggregate ---
+    # metriche aggregate
     agg = {
         "n_files": len(all_metrics),
         "mse_mean": np.mean([m["mse"] for m in all_metrics]),
@@ -104,7 +104,7 @@ def evaluate_results(results_dir, gt_dir, output_csv=None):
         "vel_error_std": np.std([m["vel_error"] for m in all_metrics]),
     }
 
-    # --- Stampa risultati ---
+    # print dei risultati
     print(f"\n{'='*60}")
     print(f"  RISULTATI VALUTAZIONE S2P")
     print(f"{'='*60}")
@@ -121,7 +121,7 @@ def evaluate_results(results_dir, gt_dir, output_csv=None):
     print(f"  Velocity Error:   {agg['vel_error_mean']:.6f} ± {agg['vel_error_std']:.6f}")
     print(f"{'='*60}\n")
 
-    # --- Salva CSV se richiesto ---
+    # salva csv se richiesto
     if output_csv:
         os.makedirs(os.path.dirname(output_csv) or ".", exist_ok=True)
         with open(output_csv, "w", newline="") as f:
@@ -133,7 +133,7 @@ def evaluate_results(results_dir, gt_dir, output_csv=None):
             for m in per_file_results:
                 writer.writerow(m)
 
-        # Aggiungi riga di riepilogo
+        # aggiungi riga di riepilogo
         with open(output_csv, "a", newline="") as f:
             writer = csv.writer(f)
             writer.writerow([])
@@ -160,7 +160,7 @@ if __name__ == "__main__":
                         help="Path dove salvare i risultati CSV")
     args = parser.parse_args()
 
-    # Se gt_dir non specificato, usa il path SSH di default
+    # se gt_dir non specificato, usa il path SSH di default
     if args.gt_dir is None:
         args.gt_dir = "/mnt/diskone-first/Mead_EMOTE_Elaborated_Pose/pose"
 

@@ -45,9 +45,8 @@ def read_data(args):
     Returns:
         train_data, valid_data, test_data, subjects_dict
     """
-    # --- Cache: se esiste e richiesta, carica da file ---
-    # ATTENZIONE: cancellare s2p_cache.pkl dopo ogni modifica al preprocessing
-    # (es. dopo il fix di allineamento audio/pose del 2026-07-13)
+    #  cache: se esiste e richiesta, carica da file
+    #  cancellare s2p_cache.pkl dopo ogni modifica al preprocessing
     cache_file = os.path.join(args.data_dir, "s2p_cache.pkl")
     if args.cache_data and os.path.exists(cache_file):
         print(f"Caricamento dati da cache: {cache_file}")
@@ -69,7 +68,7 @@ def read_data(args):
 
     processor = Wav2Vec2Processor.from_pretrained("facebook/wav2vec2-base-960h")
 
-    # Troviamo tutti i file audio
+    # troviamo tutti i file audio
     if not os.path.isdir(args.audio_path):
         raise FileNotFoundError(f"Cartella audio non trovata: {args.audio_path}")
     if not os.path.isdir(args.pose_path):
@@ -78,7 +77,7 @@ def read_data(args):
     fs = sorted([f for f in os.listdir(args.audio_path) if f.endswith('.wav')])
     print(f"  Trovati {len(fs)} file audio")
 
-    # Limita il numero di campioni se richiesto (per test veloci)
+    # limita il numero di campioni se richiesto (per test veloci)
     if args.max_samples is not None:
         fs = fs[:args.max_samples]
         print(f"  Limitato a {args.max_samples} campioni (--max_samples)")
@@ -92,30 +91,30 @@ def read_data(args):
             continue
 
         try:
-            # Carica audio e porta a 16000Hz
+            # carica audio e porta a 16000Hz
             speech_array, sampling_rate = librosa.load(wav_file, sr=16000)
 
-            # Carica i 3 angoli di rotazione per frame
+            # carica i 3 angoli di rotazione per frame
             pose_data = np.load(npy_file, allow_pickle=True)
 
-            # Verifica shape: deve essere (N_frames, 3)
+            # verifica shape: deve essere (N_frames, 3)
             if pose_data.ndim != 2 or pose_data.shape[1] != 3:
                 print(f"  [WARN] Shape inattesa per {f}: {pose_data.shape}, skip")
                 skipped += 1
                 continue
 
-            # --- FIX: Allineamento temporale audio ↔ pose ---
-            # Le pose sono a 30 FPS. Trimmiamo l'audio alla durata esatta
+            # allineamento temporale audio ↔ pose
+            # le pose sono a 30 FPS. Trimmiamo l'audio alla durata esatta
             # per ridurre il disallineamento prima dell'interpolazione nel modello.
             expected_samples = int(pose_data.shape[0] / 30.0 * 16000)
             speech_array = speech_array[:expected_samples]
 
-            # Estrai le features con Wav2Vec2
+            # estrai le features con Wav2Vec2
             input_values = np.squeeze(
                 processor(speech_array, sampling_rate=16000).input_values
             )
 
-            # Chiave del dizionario (es. M003_angry_1_001)
+            # chiave del dizionario (es. M003_angry_1_001)
             key = f.replace(".wav", "")
 
             data_dict[key]["name"] = f
@@ -133,12 +132,12 @@ def read_data(args):
     if len(data_dict) == 0:
         raise RuntimeError("Nessun dato valido caricato. Controlla i percorsi.")
 
-    # --- LOGICA DI SPLIT (Come S2L): split per soggetto ---
-    # Estraiamo tutti i soggetti unici dai nomi dei file (es. M003, M012, ecc.)
+    # logica di split (come s2l): split per soggetto
+    # estraiamo tutti i soggetti unici dai nomi dei file (es. M003, M012, ecc.)
     subjects = sorted(list(set([k.split("_")[0] for k in data_dict.keys()])))
     print(f"\n  Soggetti trovati: {len(subjects)} → {subjects}")
 
-    # Dividiamo i soggetti: es. 80% Train, 10% Validation, 10% Test
+    # dividiamo i soggetti: es. 80% train, 10% validation, 10% test
     n_train = int(len(subjects) * args.train_split)
     n_val = int(len(subjects) * args.val_split)
 
@@ -151,7 +150,7 @@ def read_data(args):
     print(f"  Split soggetti Train: {subjects_dict['train']}, "
           f"Val: {subjects_dict['val']}, Test: {subjects_dict['test']}")
 
-    # Assegniamo i file alle liste corrette in base al soggetto
+    # assegniamo i file alle liste corrette in base al soggetto
     for k, v in data_dict.items():
         subject_id = k.split("_")[0]
         if subject_id in subjects_dict["train"]:
@@ -164,13 +163,13 @@ def read_data(args):
     print(f"\nDati caricati Train: {len(train_data)}, "
           f"Validation: {len(valid_data)}, Test: {len(test_data)}")
 
-    # --- Diagnostica shape ---
+    # diagnostica shape
     if train_data:
         sample = train_data[0]
         print(f"  Esempio — Audio shape: {sample['audio'].shape}, "
               f"Pose shape: {sample['pose'].shape}")
 
-    # --- Salva cache se richiesto ---
+    #  salva cache se richiesto
     if args.cache_data:
         print(f"Salvataggio cache in: {cache_file}")
         with open(cache_file, "wb") as f_cache:
@@ -198,13 +197,13 @@ def get_dataloaders(args):
 
     batch_size = getattr(args, "batch_size", 1)
 
-    # Dataloader per il Train (con shuffle=True per mescolare i dati)
+    # dataloader per il train (con shuffle=True per mescolare i dati)
     train_dataset = PoseDataset(train_data, "train")
     dataset["train"] = data.DataLoader(
         dataset=train_dataset, batch_size=batch_size, shuffle=True
     )
 
-    # Dataloader per Validation e Test (shuffle=False)
+    # dataloader per validation e test (shuffle=False)
     valid_dataset = PoseDataset(valid_data, "val")
     dataset["valid"] = data.DataLoader(
         dataset=valid_dataset, batch_size=batch_size, shuffle=False
@@ -219,7 +218,7 @@ def get_dataloaders(args):
 
 
 if __name__ == "__main__":
-    # Test standalone del dataloader
+    # test standalone del dataloader
     import sys
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     from config import get_args
@@ -227,7 +226,7 @@ if __name__ == "__main__":
     args = get_args()
     loaders = get_dataloaders(args)
 
-    # Verifichiamo cosa c'è dentro il loader di Train
+    # verifichiamo cosa c'è dentro il loader di train
     for batch_audio, batch_pose, names in loaders["train"]:
         print(f"\n PRIMO BATCH ESTRATTO DAL DATALOADER (TRAIN)")
         print(f"File processato: {names[0]}")
