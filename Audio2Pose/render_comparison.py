@@ -34,9 +34,19 @@ import librosa
 os.environ['PYOPENGL_PLATFORM'] = 'egl'
 
 import pyrender
-from psbody.mesh import Mesh
 from subprocess import call
 from tqdm import tqdm
+
+
+class MeshLike:
+    """Sostituto minimale di psbody.mesh.Mesh.
+    psbody.mesh NON viene usato perché il suo __init__ importa meshviewer
+    che richiede GLUT, non disponibile su server SSH headless.
+    Questa classe replica l'interfaccia .v e .f necessaria al renderer.
+    """
+    def __init__(self, v, f):
+        self.v = np.array(v, dtype=np.float64)
+        self.f = np.array(f)
 
 # path per importare model e utils del progetto S2P
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
@@ -60,8 +70,8 @@ def render_mesh_helper(mesh, t_center, rot=np.zeros(3)):
     frustum = {'near': 0.01, 'far': 3.0, 'height': 800, 'width': 800}
     intensity = 2.0
 
-    mesh_copy = Mesh(mesh.v, mesh.f)
-    mesh_copy.v[:] = cv2.Rodrigues(rot)[0].dot((mesh_copy.v - t_center).T).T + t_center
+    rotated_v = cv2.Rodrigues(rot)[0].dot((np.array(mesh.v) - t_center).T).T + t_center
+    mesh_copy = MeshLike(rotated_v, mesh.f)
 
     primitive_material = pyrender.material.MetallicRoughnessMaterial(
         alphaMode='BLEND',
@@ -131,8 +141,8 @@ def render_vertices_to_video(vertices_array, faces, audio_path, out_video_path, 
     n_frames = vertices_array.shape[0]
 
     for i in tqdm(range(n_frames), desc=f"  Rendering {os.path.basename(out_video_path)}"):
-        psbody_mesh = Mesh(vertices_array[i], faces)
-        frame = render_mesh_helper(psbody_mesh, center)
+        mesh = MeshLike(vertices_array[i], faces)
+        frame = render_mesh_helper(mesh, center)
         writer.write(frame)
 
     writer.release()
