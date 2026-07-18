@@ -297,7 +297,7 @@ def main():
     parser.add_argument("--vertices_pose", type=str, required=True,
                         help="File .npy vertici GT dottorando (N_frames, V, 3)")
     parser.add_argument("--template", type=str,
-                        default="../ScanTalk/src/examples/thanos.ply",
+                        default="../ScanTalk/src/examples/FLAME_sample.ply",
                         help="Mesh template per recuperare le facce della topologia FLAME")
 
     # path progetto
