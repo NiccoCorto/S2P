@@ -230,11 +230,23 @@ def run_experiment(exp_name, vel_label, args):
     print(f"  vertices (statici):  {vertices_static.shape}")
     print(f"  vertices_pose (GT):  {vertices_pose.shape}")
 
-    #  4. Predici le rotazioni dall'audio 
-    print("  Predizione rotazioni testa dall'audio...")
+    # ── 3.5 Allinea e trimma l'audio ai frame effettivi ───────────────────
+    import soundfile as sf
     n_target_frames = vertices_static.shape[0]
+    
+    # Carichiamo l'audio e lo trimmiamo esattamente come fa data_loader.py in fase di addestramento
+    audio_data, sr = librosa.load(args.audio, sr=16000)
+    expected_samples = int(n_target_frames / args.fps * sr)
+    audio_data = audio_data[:expected_samples]
+    
+    # Salviamo l'audio trimmato per usarlo nel rendering e nella predizione
+    trimmed_audio_path = os.path.join(out_subdir, "trimmed_audio.wav")
+    sf.write(trimmed_audio_path, audio_data, sr)
+
+    #  4. Predici le rotazioni dall'audio 
+    print("  Predizione rotazioni testa dall'audio (trimmato)...")
     rotations = predict_pose_from_audio(
-        model, args.audio, device=args.device, target_frames=n_target_frames
+        model, trimmed_audio_path, device=args.device, target_frames=n_target_frames
     )
     print(f"  Rotazioni predette: {rotations.shape}")
 
@@ -255,14 +267,14 @@ def run_experiment(exp_name, vel_label, args):
     print("\n Rendering Ground Truth (vertices_pose)...")
     gt_video_path = os.path.join(out_subdir, "gt_video.mp4")
     render_vertices_to_video(
-        vertices_pose[:n_frames], faces, args.audio, gt_video_path, fps=args.fps
+        vertices_pose[:n_frames], faces, trimmed_audio_path, gt_video_path, fps=args.fps
     )
 
     #  7. Rendering Predizione
     print("\n  Rendering Predizione Audio2Pose...")
     pred_video_path = os.path.join(out_subdir, "pred_video.mp4")
     render_vertices_to_video(
-        vertices_rotated, faces, args.audio, pred_video_path, fps=args.fps
+        vertices_rotated, faces, trimmed_audio_path, pred_video_path, fps=args.fps
     )
 
     #  8. Unisci i due video affiancati 
