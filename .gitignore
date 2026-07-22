@@ -15,7 +15,6 @@ __pycache__/
 *.mp4
 *.pth
 *.pkl
-
 # ==========================================
 # 3. CARTELLE DI OUTPUT DI S2P (DATI REALI)
 # Ignorate per non intasare GitHub con i risultati
@@ -43,3 +42,6 @@ hf_cache/
 env_niccotesi/
 scantalk_env/
 Logs/
+run_experiments.sh
+run_experiments.sh
+log_*.txt

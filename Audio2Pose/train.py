@@ -206,7 +206,7 @@ def test(args, model, test_loader):
         model.load_state_dict(torch.load(best_path, map_location=args.device))
         print(f"  Caricato il miglior modello: {best_path}")
     else:
-        print(f"  [WARN] best_audio2pose.pth non trovato, uso il modello corrente")
+        print(f"  best_audio2pose.pth non trovato, uso il modello corrente")
 
     model = model.to(torch.device(args.device))
     model.eval()

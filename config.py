@@ -46,13 +46,13 @@ def get_args():
     # iperparametri training
     parser.add_argument("--lr", type=float, default=0.00005,
                         help="Learning rate iniziale")
-    parser.add_argument("--max_epoch", type=int, default=150,
+    parser.add_argument("--max_epoch", type=int, default=200,
                         help="Numero massimo di epoche")
     parser.add_argument("--batch_size", type=int, default=1,
                         help="Batch size (1 perché sequenze di lunghezza variabile)")
-    parser.add_argument("--patience", type=int, default=150,
+    parser.add_argument("--patience", type=int, default=200,
                         help="Epoche senza miglioramento prima di early stopping")
-    parser.add_argument("--vel_loss_weight", type=float, default=8.0,
+    parser.add_argument("--vel_loss_weight", type=float, default=1.0,
                         help="Peso della velocity loss rispetto alla position loss")
 
     # dati
