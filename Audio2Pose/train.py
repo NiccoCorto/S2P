@@ -40,9 +40,9 @@ class PoseLoss(nn.Module):
         prediction_shift = predictions[:, 1:, :] - predictions[:, :-1, :]
         target_shift = target[:, 1:, :] - target[:, :-1, :]
         vel_loss = self.mse(prediction_shift, target_shift)
-
+        total_loss = pos_loss + (self.vel_weight * vel_loss)
         # sommiamo gli errori (diamo più peso alla velocità per movimenti fluidi)
-        return pos_loss + (self.vel_weight * vel_loss)
+        return total_loss, pos_loss, vel_loss
 
 
 def setup_logging(log_path):
@@ -106,7 +106,7 @@ def trainer(args, train_loader, dev_loader, model, optimizer, criterion, schedul
             predictions = predictions[:, :min_seq_len, :]
             pose_target_aligned = pose_target[:, :min_seq_len, :]
 
-            loss = criterion(predictions, pose_target_aligned)
+            loss, pos_loss, vel_loss = criterion(predictions, pose_target_aligned)
             loss.backward()
             optimizer.step()
 
@@ -156,9 +156,11 @@ def trainer(args, train_loader, dev_loader, model, optimizer, criterion, schedul
         # Log
         log_epoch(csv_path, e + 1, train_loss, val_loss, new_lr, is_best)
         experiment.log_metrics({
-            "train_loss": train_loss,
+            "train_loss_totale": train_loss,
             "val_loss": val_loss,
-            "learning_rate": new_lr
+            "learning_rate": new_lr,
+            "train_pos_loss_pura": pos_loss.item(), # Logga la Pos Loss
+            "train_vel_loss_pura": vel_loss.item()  # Logga la Vel Loss
         }, step=e + 1)
 
         # print riepilogo epoca
