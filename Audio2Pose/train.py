@@ -131,7 +131,7 @@ def trainer(args, train_loader, dev_loader, model, optimizer, criterion, schedul
                 predictions = predictions[:, :min_seq_len, :]
                 pose_target_aligned = pose_target[:, :min_seq_len, :]
 
-                loss = criterion(predictions, pose_target_aligned)
+                loss, _, _ = criterion(predictions, pose_target_aligned)
                 valid_loss_log.append(loss.item())
 
         val_loss = np.mean(valid_loss_log) if valid_loss_log else float("inf")
