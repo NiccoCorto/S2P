@@ -1,7 +1,7 @@
 """
 train.py - Script di addestramento per Audio2Pose (S2P)
 Segue la struttura di train_S2L.py di s2l-s2d.
-Features: early stopping, best model saving, LR scheduler, logging CSV.
+Features: early stopping, best model saving, LR fisso, logging CSV separato per pos/vel loss.
 """
 import numpy as np
 import csv
@@ -40,9 +40,14 @@ class PoseLoss(nn.Module):
         prediction_shift = predictions[:, 1:, :] - predictions[:, :-1, :]
         target_shift = target[:, 1:, :] - target[:, :-1, :]
         vel_loss = self.mse(prediction_shift, target_shift)
+
+        # sommiamo gli errori con il peso configurato
+        # vel_weight=0 disabilita la velocity loss (solo pos_loss)
+        # vel_weight=2044 standardizza la vel_loss per avere la stessa magnitudo di pos_loss
         total_loss = pos_loss + (self.vel_weight * vel_loss)
-        # sommiamo gli errori (diamo più peso alla velocità per movimenti fluidi)
-        return total_loss, pos_loss, vel_loss
+
+        # ritorniamo anche i valori grezzi (non pesati) per il logging
+        return total_loss, pos_loss.detach().item(), vel_loss.detach().item()
 
 
 def setup_logging(log_path):
@@ -51,19 +56,25 @@ def setup_logging(log_path):
     csv_path = os.path.join(log_path, "training_log.csv")
     with open(csv_path, "w", newline="") as f:
         writer = csv.writer(f)
-        writer.writerow(["epoch", "train_loss", "val_loss", "lr", "best"])
+        writer.writerow(["epoch", "train_loss", "train_pos_loss", "train_vel_loss",
+                         "val_loss", "val_pos_loss", "val_vel_loss", "lr", "best"])
     return csv_path
 
 
-def log_epoch(csv_path, epoch, train_loss, val_loss, lr, is_best):
-    """Scrive una riga nel log CSV."""
+def log_epoch(csv_path, epoch, train_loss, train_pos, train_vel,
+              val_loss, val_pos, val_vel, lr, is_best):
+    """Scrive una riga nel log CSV con le loss separate."""
     with open(csv_path, "a", newline="") as f:
         writer = csv.writer(f)
-        writer.writerow([epoch, f"{train_loss:.8f}", f"{val_loss:.8f}",
-                         f"{lr:.8f}", "best" if is_best else ""])
+        writer.writerow([
+            epoch,
+            f"{train_loss:.8f}", f"{train_pos:.8f}", f"{train_vel:.8f}",
+            f"{val_loss:.8f}", f"{val_pos:.8f}", f"{val_vel:.8f}",
+            f"{lr:.8f}", "best" if is_best else ""
+        ])
 
 
-def trainer(args, train_loader, dev_loader, model, optimizer, criterion, scheduler, experiment):
+def trainer(args, train_loader, dev_loader, model, optimizer, criterion, experiment):
     """Loop di addestramento con early stopping e best model saving."""
     save_path = args.save_path
     os.makedirs(save_path, exist_ok=True)
@@ -73,12 +84,14 @@ def trainer(args, train_loader, dev_loader, model, optimizer, criterion, schedul
     print(f"\n{'='*60}")
     print(f"Inizio addestramento su {args.device}")
     print(f"  Epoche max:      {args.max_epoch}")
-    print(f"  Learning rate:   {args.lr}")
+    print(f"  Learning rate:   {args.lr} (FISSO, no scheduler)")
     print(f"  Early stopping:  {args.patience} epoche senza miglioramento")
     print(f"  Hidden dim:      {args.hidden_dim}")
     print(f"  LSTM layers:     {args.num_layers}")
     print(f"  Dropout:         {args.dropout}")
-    print(f"  Vel loss weight: {args.vel_loss_weight}")
+    print(f"  Vel loss weight: {args.vel_loss_weight}"
+          f" ({'disabilitata' if args.vel_loss_weight == 0 else 'standardizzata' if args.vel_loss_weight > 100 else 'normale'})")
+    print(f"  Checkpoint ogni: 20 epoche")
     print(f"{'='*60}\n")
 
     best_val_loss = float("inf")
@@ -108,14 +121,16 @@ def trainer(args, train_loader, dev_loader, model, optimizer, criterion, schedul
             predictions = predictions[:, :min_seq_len, :]
             pose_target_aligned = pose_target[:, :min_seq_len, :]
 
-            loss, pos_loss, vel_loss = criterion(predictions, pose_target_aligned)
+            loss, pos_l, vel_l = criterion(predictions, pose_target_aligned)
             loss.backward()
             optimizer.step()
 
             loss_log.append(loss.item())
-            pos_loss_log.append(pos_loss.item())
-            vel_loss_log.append(vel_loss.item())
-            pbar.set_postfix({"Loss": f"{np.mean(loss_log):.6f}"})
+            pos_loss_log.append(pos_l)
+            vel_loss_log.append(vel_l)
+            pbar.set_postfix({"Loss": f"{np.mean(loss_log):.6f}",
+                              "Pos": f"{np.mean(pos_loss_log):.6f}",
+                              "Vel": f"{np.mean(vel_loss_log):.8f}"})
 
         train_loss = np.mean(loss_log)
         train_pos_loss = np.mean(pos_loss_log)
@@ -123,6 +138,8 @@ def trainer(args, train_loader, dev_loader, model, optimizer, criterion, schedul
 
         # fase di validation
         valid_loss_log = []
+        valid_pos_loss_log = []
+        valid_vel_loss_log = []
         model.eval()
 
         with torch.no_grad():
@@ -137,17 +154,17 @@ def trainer(args, train_loader, dev_loader, model, optimizer, criterion, schedul
                 predictions = predictions[:, :min_seq_len, :]
                 pose_target_aligned = pose_target[:, :min_seq_len, :]
 
-                loss, _, _ = criterion(predictions, pose_target_aligned)
+                loss, pos_l, vel_l = criterion(predictions, pose_target_aligned)
                 valid_loss_log.append(loss.item())
+                valid_pos_loss_log.append(pos_l)
+                valid_vel_loss_log.append(vel_l)
 
         val_loss = np.mean(valid_loss_log) if valid_loss_log else float("inf")
+        val_pos_loss = np.mean(valid_pos_loss_log) if valid_pos_loss_log else float("inf")
+        val_vel_loss = np.mean(valid_vel_loss_log) if valid_vel_loss_log else float("inf")
 
-        # learning rate scheduler
+        # learning rate FISSO — nessuno scheduler
         current_lr = optimizer.param_groups[0]["lr"]
-        scheduler.step(val_loss)
-        new_lr = optimizer.param_groups[0]["lr"]
-        if new_lr != current_lr:
-            print(f"LR ridotto: {current_lr:.2e} , {new_lr:.2e}")
 
         # best model & early stopping
         is_best = val_loss < best_val_loss
@@ -160,24 +177,30 @@ def trainer(args, train_loader, dev_loader, model, optimizer, criterion, schedul
             patience_counter += 1
 
         # Log
-        log_epoch(csv_path, e + 1, train_loss, val_loss, new_lr, is_best)
+        log_epoch(csv_path, e + 1,
+                  train_loss, train_pos_loss, train_vel_loss,
+                  val_loss, val_pos_loss, val_vel_loss,
+                  current_lr, is_best)
         experiment.log_metrics({
-            "train_loss_totale": train_loss,
+            "train_loss": train_loss,
+            "train_pos_loss": train_pos_loss,
+            "train_vel_loss": train_vel_loss,
             "val_loss": val_loss,
-            "learning_rate": new_lr,
-            "train_pos_loss_pura": train_pos_loss, # Logga la Pos Loss (media epoca)
-            "train_vel_loss_pura": train_vel_loss  # Logga la Vel Loss (media epoca)
+            "val_pos_loss": val_pos_loss,
+            "val_vel_loss": val_vel_loss,
+            "learning_rate": current_lr
         }, step=e + 1)
 
         # print riepilogo epoca
-        best_marker = "BEST" if is_best else ""
+        best_marker = " ★ BEST" if is_best else ""
         print(f"  Epoca {e+1}/{args.max_epoch} | "
-              f"Train: {train_loss:.6f} | Val: {val_loss:.6f} | "
-              f"LR: {new_lr:.2e} | "
+              f"Train: {train_loss:.6f} (Pos: {train_pos_loss:.6f} | Vel: {train_vel_loss:.8f}) | "
+              f"Val: {val_loss:.6f} (Pos: {val_pos_loss:.6f} | Vel: {val_vel_loss:.8f}) | "
+              f"LR: {current_lr:.2e} | "
               f"Patience: {patience_counter}/{args.patience}{best_marker}")
 
-        # salva checkpoint periodici
-        if (e + 1) % 5 == 0:
+        # salva checkpoint periodici ogni 20 epoche
+        if (e + 1) % 20 == 0:
             torch.save(model.state_dict(),
                        os.path.join(save_path, f"audio2pose_epoch_{e+1}.pth"))
 
@@ -271,17 +294,14 @@ def main():
         lr=args.lr
     )
 
-    # 3. Learning Rate Scheduler
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode="min", factor=0.5, patience=15, verbose=False
-    )
+    # 3. (nessuno scheduler — LR fisso a 1e-4 per tutta la durata)
 
     # 4. Carica i dati
     dataset = get_dataloaders(args)
 
     # 5. Training
     model = trainer(args, dataset["train"], dataset["valid"],
-                    model, optimizer, criterion, scheduler, experiment)
+                    model, optimizer, criterion, experiment)
 
     # 6. Test
     test(args, model, dataset["test"])
