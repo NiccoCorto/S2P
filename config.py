@@ -44,8 +44,8 @@ def get_args():
                         help="Dropout tra LSTM e FC")
 
     # iperparametri training
-    parser.add_argument("--lr", type=float, default=0.00005,
-                        help="Learning rate iniziale")
+    parser.add_argument("--lr", type=float, default=0.0001,
+                        help="Learning rate (fisso, nessuno scheduler)")
     parser.add_argument("--max_epoch", type=int, default=200,
                         help="Numero massimo di epoche")
     parser.add_argument("--batch_size", type=int, default=1,

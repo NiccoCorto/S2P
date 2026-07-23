@@ -1,6 +1,6 @@
 """
 model.py - Rete neurale Audio2Pose per S2P
-Architettura: Wav2Vec2 (frozen) → LSTM bidirezionale → FC → 3 angoli (Pitch, Yaw, Roll)
+Architettura: Wav2Vec2 (completamente frozen) → LSTM bidirezionale → FC → 3 angoli (Pitch, Yaw, Roll)
 Ispirata a Speech2Land di s2l-s2d, adattata per predire rotazioni della testa.
 """
 import torch
@@ -25,15 +25,12 @@ class HeadPosePredictor(nn.Module):
         num_layers = getattr(args, "num_layers", 2) if args else 2
         dropout = getattr(args, "dropout", 0.2) if args else 0.2
 
-        # Audio Encoder (Wav2Vec2) — partial fine-tuning come ScanTalk/HuBERT
-        # congela solo il CNN feature extractor; scongela gli ultimi 4 transformer blocks
+        # Audio Encoder (Wav2Vec2) — completamente frozen (no fine-tuning)
+        # tutti i parametri (CNN feature extractor + tutti i transformer blocks)
+        # vengono congelati: il modello impara solo a partire dalle feature fisse.
         self.audio_encoder = Wav2Vec2Model.from_pretrained("facebook/wav2vec2-base-960h")
-        self.audio_encoder.feature_extractor._freeze_parameters()
-        n_layers = len(self.audio_encoder.encoder.layers)
-        for i, layer in enumerate(self.audio_encoder.encoder.layers):
-            requires_grad = (i >= n_layers - 4)
-            for param in layer.parameters():
-                param.requires_grad = requires_grad
+        for param in self.audio_encoder.parameters():
+            param.requires_grad = False
 
         # Layer Normalization sull'input (stabilizza il training)
         self.layer_norm = nn.LayerNorm(768)

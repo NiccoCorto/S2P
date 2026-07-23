@@ -104,10 +104,10 @@ def read_data(args):
                 continue
 
             # allineamento temporale audio ↔ pose
-            # le pose sono a 30 FPS. Trimmiamo l'audio alla durata esatta
-            # per ridurre il disallineamento prima dell'interpolazione nel modello.
-            expected_samples = int(pose_data.shape[0] / 30.0 * 16000)
-            speech_array = speech_array[:expected_samples]
+            # NON tagliamo l'audio: lo passiamo intero al Wav2Vec2.
+            # Sarà l'interpolazione nel forward() del modello (target_seq_len)
+            # a comprimere la feature map audio alla lunghezza esatta della posa.
+            # Questo permette all'encoder di "indovinare" il trim da solo.
 
             # estrai le features con Wav2Vec2
             input_values = np.squeeze(
