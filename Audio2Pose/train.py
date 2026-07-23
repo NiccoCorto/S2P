@@ -86,6 +86,8 @@ def trainer(args, train_loader, dev_loader, model, optimizer, criterion, schedul
 
     for e in range(args.max_epoch):
         loss_log = []
+        pos_loss_log = []
+        vel_loss_log = []
 
         # fase di training
         model.train()
@@ -111,9 +113,13 @@ def trainer(args, train_loader, dev_loader, model, optimizer, criterion, schedul
             optimizer.step()
 
             loss_log.append(loss.item())
+            pos_loss_log.append(pos_loss.item())
+            vel_loss_log.append(vel_loss.item())
             pbar.set_postfix({"Loss": f"{np.mean(loss_log):.6f}"})
 
         train_loss = np.mean(loss_log)
+        train_pos_loss = np.mean(pos_loss_log)
+        train_vel_loss = np.mean(vel_loss_log)
 
         # fase di validation
         valid_loss_log = []
@@ -159,8 +165,8 @@ def trainer(args, train_loader, dev_loader, model, optimizer, criterion, schedul
             "train_loss_totale": train_loss,
             "val_loss": val_loss,
             "learning_rate": new_lr,
-            "train_pos_loss_pura": pos_loss.item(), # Logga la Pos Loss
-            "train_vel_loss_pura": vel_loss.item()  # Logga la Vel Loss
+            "train_pos_loss_pura": train_pos_loss, # Logga la Pos Loss (media epoca)
+            "train_vel_loss_pura": train_vel_loss  # Logga la Vel Loss (media epoca)
         }, step=e + 1)
 
         # print riepilogo epoca
