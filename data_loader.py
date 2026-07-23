@@ -47,7 +47,9 @@ def read_data(args):
     """
     #  cache: se esiste e richiesta, carica da file
     #  cancellare s2p_cache.pkl dopo ogni modifica al preprocessing
-    cache_file = os.path.join(args.data_dir, "s2p_cache.pkl")
+    # La cache va salvata nella cartella del progetto (non in data_dir che è read-only)
+    _project_dir = os.path.dirname(os.path.abspath(__file__))
+    cache_file = os.path.join(_project_dir, "s2p_cache.pkl")
     if args.cache_data and os.path.exists(cache_file):
         print(f"Caricamento dati da cache: {cache_file}")
         with open(cache_file, "rb") as f:
