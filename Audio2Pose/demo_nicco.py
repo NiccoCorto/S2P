@@ -80,7 +80,15 @@ def run_scantalk(audio_path, actor_file, scantalk_model_path, output_dir, device
         if os.path.isdir(diffnet_path) and diffnet_path not in sys.path:
             sys.path.insert(0, diffnet_path)
 
-    # Import ritardato: disponibile solo dopo aver aggiunto scantalk_src a sys.path
+    # IMPORTANTE: S2P/Audio2Pose/ contiene un file 'model.py' (HeadPosePredictor)
+    # che confligge con il package 'model/' di ScanTalk (model.scantalk).
+    # Lo rimuoviamo temporaneamente da sys.path durante l'import di ScanTalk,
+    # e lo riaggiungiamo subito dopo per non rompere gli altri import.
+    audio2pose_dir = os.path.dirname(os.path.abspath(__file__))
+    _path_was_present = audio2pose_dir in sys.path
+    if _path_was_present:
+        sys.path.remove(audio2pose_dir)
+
     try:
         import torch
         import librosa
@@ -93,6 +101,10 @@ def run_scantalk(audio_path, actor_file, scantalk_model_path, output_dir, device
             f"Verifica che --scantalk_src punti alla cartella src/ di ScanTalk "
             f"e che tutti i requirements di ScanTalk siano installati."
         )
+    finally:
+        # Riaggiungi sempre Audio2Pose/ a sys.path (necessario per model.py di S2P)
+        if _path_was_present and audio2pose_dir not in sys.path:
+            sys.path.insert(0, audio2pose_dir)
 
     import torch
 
