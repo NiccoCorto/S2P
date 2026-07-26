@@ -1,16 +1,31 @@
 """
-demo_nicco.py - Script di fusione ScanTalk + Audio2Pose
-Prende le mesh 3D generate da ScanTalk (labbra animate, testa ferma)
-e vi applica le rotazioni della testa predette dal modello Audio2Pose.
+demo_nicco.py - Pipeline end-to-end S2P: ScanTalk + Audio2Pose
+Partendo da un singolo file audio, lo script:
+  1. Esegue ScanTalk per animare le labbra della mesh template
+  2. Esegue Audio2Pose per predire i movimenti della testa
+  3. Fonde i due risultati: applica le rotazioni alle mesh di ScanTalk
+  4. Salva le mesh finali pronte per il rendering
 
-3 Modalità di utilizzo:
-  1. --pose_file + --scantalk_dir  → Applica un file .npy di pose a mesh .ply già generate
-  2. --audio + --scantalk_dir      → Pipeline end-to-end: audio → predici pose → applica
-  3. --pose_file + --vertices_npy  → Applica pose a vertici salvati come .npy (N_frames, V, 3)
+Modalità di utilizzo:
+  # Pipeline completa automatica (ScanTalk + Audio2Pose)
+  python demo_nicco.py --audio test.wav
+      --checkpoint Saves/best_audio2pose.pth
+      --scantalk_src /path/to/ScanTalk/src
+      --scantalk_model /path/to/scantalk.pth.tar
+      --actor_file /path/to/FLAME_sample.ply
+      --output_dir Demo_Finale
 
-NOTA ROTAZIONE: Le mesh FLAME di ScanTalk hanno l'origine (0,0,0) posizionata
-al perno anatomico del collo. La rotazione viene applicata attorno all'origine e non
-al baricentro dei vertici, per ottenere un movimento naturale della testa.
+  # Se ScanTalk è già stato calcolato (salta il passo 1)
+  python demo_nicco.py --audio test.wav
+      --checkpoint Saves/best_audio2pose.pth
+      --scantalk_dir /path/alla/cartella/scantalk
+      --output_dir Demo_Finale
+
+  # Applica pose già calcolate a mesh già calcolate
+  python demo_nicco.py --pose_file Results/M034.npy --scantalk_dir scantalk_output
+
+NOTA ROTAZIONE: Le mesh FLAME hanno l'origine (0,0,0) al perno anatomico del collo.
+La rotazione viene applicata attorno all'origine per un movimento naturale della testa.
 """
 import os
 import sys
@@ -21,26 +36,181 @@ import cv2
 import trimesh
 from tqdm import tqdm
 
+
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 
+# ─────────────────────────────────────────────
+# STEP 1: ScanTalk — anima le labbra
+# ─────────────────────────────────────────────
+
+def run_scantalk(audio_path, actor_file, scantalk_model_path, output_dir, device,
+                 scantalk_src=None,
+                 in_channels=3, out_channels=3, latent_channels=32, lstm_layers=3):
+    """Esegue ScanTalk per generare le mesh animate (labbra) a partire da un audio.
+
+    Args:
+        audio_path:          Path al file .wav di input
+        actor_file:          Path al template PLY (es. FLAME_sample.ply)
+        scantalk_model_path: Path al checkpoint ScanTalk (.pth.tar)
+        output_dir:          Cartella di output — le PLY verranno salvate in output_dir/Meshes/
+        device:              'cuda' o 'cpu'
+        scantalk_src:        Path alla cartella src/ di ScanTalk (aggiunta a sys.path per gli import)
+        in_channels:         Iperparametro DiffusionNet (default: 3)
+        out_channels:        Iperparametro DiffusionNet (default: 3)
+        latent_channels:     Iperparametro DiffusionNet (default: 32)
+        lstm_layers:         Numero di layer LSTM del modello ScanTalk (default: 3)
+
+    Returns:
+        str — Path alla cartella che contiene i file .ply generati (output_dir/Meshes)
+    """
+    print(f"\n{'='*60}")
+    print("  STEP 1: ScanTalk — Generazione mesh animate (labbra)")
+    print(f"{'='*60}")
+    print(f"  Audio:   {audio_path}")
+    print(f"  Actor:   {actor_file}")
+    print(f"  Modello: {scantalk_model_path}")
+
+    # Aggiunge il path sorgente di ScanTalk a sys.path per gli import
+    if scantalk_src is not None:
+        if scantalk_src not in sys.path:
+            sys.path.insert(0, scantalk_src)
+        diffnet_path = os.path.join(scantalk_src, 'model', 'diffusion-net', 'src')
+        if os.path.isdir(diffnet_path) and diffnet_path not in sys.path:
+            sys.path.insert(0, diffnet_path)
+
+    # Import ritardato: disponibile solo dopo aver aggiunto scantalk_src a sys.path
+    try:
+        import torch
+        import librosa
+        from transformers import Wav2Vec2Processor
+        from model.scantalk import ScanTalk
+        import diffusion_net
+    except ImportError as e:
+        raise ImportError(
+            f"Impossibile importare i moduli di ScanTalk: {e}\n"
+            f"Verifica che --scantalk_src punti alla cartella src/ di ScanTalk "
+            f"e che tutti i requirements di ScanTalk siano installati."
+        )
+
+    import torch
+
+    # Crea le sottocartelle di output
+    meshes_dir = os.path.join(output_dir, "Meshes")
+    os.makedirs(meshes_dir, exist_ok=True)
+
+    # Carica il processor audio di HuBERT (usato da ScanTalk)
+    print("\n  Caricamento HuBERT processor...")
+    processor = Wav2Vec2Processor.from_pretrained("facebook/hubert-xlarge-ls960-ft")
+
+    # Carica il modello ScanTalk
+    print("  Caricamento modello ScanTalk...")
+    scantalk_model = ScanTalk(in_channels, out_channels, latent_channels, lstm_layers).to(device)
+    checkpoint = torch.load(scantalk_model_path, map_location=device)
+    scantalk_model.load_state_dict(checkpoint['autoencoder_state_dict'])
+    scantalk_model.eval()
+
+    # Carica e processa l'audio
+    print(f"  Processamento audio con HuBERT...")
+    speech_array, sampling_rate = librosa.load(audio_path, sr=16000)
+    audio_feature = np.squeeze(processor(speech_array, sampling_rate=16000).input_values)
+    audio_feature = np.reshape(audio_feature, (-1, audio_feature.shape[0]))
+    audio_feature = torch.FloatTensor(audio_feature).to(device=device)
+
+    # Carica il template PLY
+    print(f"  Caricamento template mesh: {actor_file}")
+    actor = trimesh.load(actor_file, process=False)
+    actor_vertices = actor.vertices
+    actor_faces = actor.faces
+    actor_vertices_t = torch.FloatTensor(actor_vertices).to(device=device).unsqueeze(0)
+
+    # Genera la sequenza di mesh animate
+    print("  Calcolo operatori DiffusionNet e predizione mesh...")
+    with torch.no_grad():
+        frames, mass, L, evals, evecs, gradX, gradY = diffusion_net.geometry.compute_operators(
+            actor_vertices_t.to('cpu').squeeze(0),
+            faces=torch.tensor(actor_faces),
+            k_eig=128
+        )
+        mass    = torch.FloatTensor(np.array(mass)).float().to(device).unsqueeze(0)
+        evals   = torch.FloatTensor(np.array(evals)).to(device).unsqueeze(0)
+        evecs   = torch.FloatTensor(np.array(evecs)).to(device).unsqueeze(0)
+        L       = L.float().to(device).unsqueeze(0)
+        gradX   = gradX.float().to(device).unsqueeze(0)
+        gradY   = gradY.float().to(device).unsqueeze(0)
+        actor_faces_t = torch.tensor(actor_faces).to(device).float().unsqueeze(0)
+
+        gen_seq = scantalk_model.predict(
+            audio_feature, actor_vertices_t.float(),
+            mass, L, evals, evecs, gradX, gradY, actor_faces_t,
+            'vocaset'
+        )
+        gen_seq = gen_seq.cpu().detach().numpy()
+
+    # Salva le mesh animate frame per frame
+    print(f"  Salvataggio {len(gen_seq)} mesh in {meshes_dir}...")
+    for k in tqdm(range(len(gen_seq)), desc="Salvataggio PLY ScanTalk"):
+        tri_mesh = trimesh.Trimesh(
+            np.array(gen_seq[k]), np.asarray(actor_faces), process=False
+        )
+        tri_mesh.export(os.path.join(meshes_dir, f"tst{str(k).zfill(3)}.ply"))
+
+    print(f"  ✓ ScanTalk completato! {len(gen_seq)} mesh salvate in: {meshes_dir}")
+    return meshes_dir
+
+
+# ─────────────────────────────────────────────
+# STEP 2: Audio2Pose — predici le rotazioni
+# ─────────────────────────────────────────────
+
+def predict_head_rotations(audio_path, checkpoint_path, device):
+    """Predice le rotazioni della testa (Pitch, Yaw, Roll) dall'audio.
+
+    Args:
+        audio_path:      Path al file .wav di input
+        checkpoint_path: Path al checkpoint Audio2Pose (.pth)
+        device:          'cuda' o 'cpu'
+
+    Returns:
+        np.ndarray shape (N_frames, 3)
+    """
+    print(f"\n{'='*60}")
+    print("  STEP 2: Audio2Pose — Predizione movimenti testa")
+    print(f"{'='*60}")
+    print(f"  Audio:      {audio_path}")
+    print(f"  Checkpoint: {checkpoint_path}")
+
+    from utils import predict_pose_from_audio
+    from model import HeadPosePredictor
+    import torch
+
+    model = HeadPosePredictor()
+    model.load_state_dict(torch.load(checkpoint_path, map_location=device))
+    model = model.to(device)
+    model.eval()
+
+    rotations = predict_pose_from_audio(model, audio_path, device=device)
+    print(f"  ✓ Predizione completata! Shape: {rotations.shape}")
+    return rotations
+
+
+# ─────────────────────────────────────────────
+# Caricamento mesh ScanTalk da cartella
+# ─────────────────────────────────────────────
+
 def load_scantalk_meshes(scantalk_dir):
     """Carica le mesh .ply generate da ScanTalk dalla cartella Meshes/.
-    
+
     Args:
-        scantalk_dir: Cartella di output di ScanTalk (contiene Meshes/, Images/, demo.mp4)
+        scantalk_dir: Cartella di output di ScanTalk (contiene Meshes/)
                       oppure cartella con direttamente i .ply
-    
+
     Returns:
         list di trimesh.Trimesh, ordinata per nome
     """
-    # cerca mesh nella sottocartella Meshes/ (struttura standard ScanTalk)
     meshes_subdir = os.path.join(scantalk_dir, "Meshes")
-    if os.path.isdir(meshes_subdir):
-        search_dir = meshes_subdir
-    else:
-        search_dir = scantalk_dir
+    search_dir = meshes_subdir if os.path.isdir(meshes_subdir) else scantalk_dir
 
     mesh_files = sorted(glob.glob(os.path.join(search_dir, '*.ply')))
 
@@ -50,94 +220,80 @@ def load_scantalk_meshes(scantalk_dir):
             f"Assicurati che ScanTalk abbia generato le mesh in questa cartella."
         )
 
-    print(f"Trovate {len(mesh_files)} mesh .ply in {search_dir}")
+    print(f"  Trovate {len(mesh_files)} mesh .ply in {search_dir}")
     meshes = []
-    for mf in tqdm(mesh_files, desc="Caricamento mesh"):
+    for mf in tqdm(mesh_files, desc="Caricamento mesh ScanTalk"):
         meshes.append(trimesh.load(mf, process=False))
 
     return meshes, mesh_files
 
 
 def load_vertices_npy(npy_path):
-    """Carica vertici da un file .npy con shape (N_frames, N_vertices, 3).
-    
-    Args:
-        npy_path: Path al file .npy dei vertici ScanTalk
-    
-    Returns:
-        list di np.ndarray shape (N_vertices, 3)
-    """
+    """Carica vertici da un file .npy con shape (N_frames, N_vertices, 3)."""
     vertices = np.load(npy_path)
     if vertices.ndim != 3 or vertices.shape[2] != 3:
         raise ValueError(
             f"Shape inattesa per vertici: {vertices.shape}. "
             f"Atteso (N_frames, N_vertices, 3)"
         )
-    print(f"Caricati {vertices.shape[0]} frame di vertici da {npy_path}")
+    print(f"  Caricati {vertices.shape[0]} frame di vertici da {npy_path}")
     return [vertices[i] for i in range(vertices.shape[0])]
 
+
+# ─────────────────────────────────────────────
+# STEP 3: Fusione — applica rotazioni alle mesh
+# ─────────────────────────────────────────────
 
 def apply_rotations(meshes_or_vertices, rotations, output_dir, mesh_faces=None,
                     pivot_origin=True):
     """Applica le rotazioni predette dal modello alle mesh/vertici di ScanTalk.
-    
+
     Args:
         meshes_or_vertices: lista di trimesh.Trimesh o lista di np.ndarray (N_v, 3)
-        rotations: np.ndarray shape (N_frames, 3) — Pitch, Yaw, Roll per frame
-        output_dir: Cartella dove salvare le mesh ruotate
-        mesh_faces: Se vertici sono ndarray, servono le facce per ricostruire la mesh
-        pivot_origin: Se True (default), ruota attorno all'origine (0,0,0) — corretto per
-                      mesh FLAME dove l'origine è al perno anatomico del collo.
-                      Se False, ruota attorno al baricentro dei vertici.
-    
+        rotations:          np.ndarray shape (N_frames, 3) — Pitch, Yaw, Roll per frame
+        output_dir:         Cartella dove salvare le mesh ruotate
+        mesh_faces:         Se vertici sono ndarray, servono le facce per ricostruire la mesh
+        pivot_origin:       Se True (default), ruota attorno all'origine (0,0,0) — corretto per
+                            mesh FLAME dove l'origine è al perno anatomico del collo.
+                            Se False, ruota attorno al baricentro dei vertici.
+
     Returns:
         int — Numero di frame processati
     """
+    print(f"\n{'='*60}")
+    print("  STEP 3: Fusione — Applicazione rotazioni testa alle mesh")
+    print(f"{'='*60}")
+
     os.makedirs(output_dir, exist_ok=True)
 
-    # allineiamo il numero di frame prendendo il minimo tra i due
     n_meshes = len(meshes_or_vertices)
-    n_poses = len(rotations)
+    n_poses  = len(rotations)
     min_frames = min(n_meshes, n_poses)
 
     if n_meshes != n_poses:
-        print(f" Allineamento: {n_meshes} mesh, {n_poses} frame di posa "
-              f" uso {min_frames} frame")
-
-    print(f"\nApplicazione rotazioni della testa a {min_frames} frame...")
+        print(f"  Allineamento: {n_meshes} mesh ScanTalk vs {n_poses} frame di posa "
+              f"→ uso {min_frames} frame")
 
     animated_vertices_list = []
 
-    for i in tqdm(range(min_frames), desc="Rotazione"):
+    for i in tqdm(range(min_frames), desc="Fusione ScanTalk + Audio2Pose"):
         item = meshes_or_vertices[i]
 
-        # ottieni i vertici
         if isinstance(item, trimesh.Trimesh):
             vertices = item.vertices.copy()
-            faces = item.faces
+            faces    = item.faces
         else:
             vertices = item.copy()
-            faces = mesh_faces
+            faces    = mesh_faces
 
-        # prendi i 3 angoli per questo frame
         rot = rotations[i]
 
-        # perno di rotazione:
-        # - FLAME: l'origine (0,0,0) è posizionata al perno anatomico (base cranio/collo)
-        #   ruotare attorno all'origine produce un movimento naturale della testa
-        # - Se pivot_origin=False: usa il baricentro (solo per mesh non-FLAME)
-        if pivot_origin:
-            t_center = np.zeros(3)
-        else:
-            t_center = np.mean(vertices, axis=0)
+        # perno di rotazione: origine (0,0,0) per mesh FLAME
+        t_center = np.zeros(3) if pivot_origin else np.mean(vertices, axis=0)
 
-        # matrice di Rotazione di Rodrigues
         R, _ = cv2.Rodrigues(rot.astype(np.float64))
-
-        # applica la rotazione a tutti i vertici attorno al perno
         rotated_vertices = R.dot((vertices - t_center).T).T + t_center
 
-        # crea e salva la nuova mesh
         if faces is not None:
             rotated_mesh = trimesh.Trimesh(
                 vertices=rotated_vertices, faces=faces, process=False
@@ -147,118 +303,181 @@ def apply_rotations(meshes_or_vertices, rotations, output_dir, mesh_faces=None,
 
         output_filepath = os.path.join(output_dir, f"frame_{i:05d}.ply")
         rotated_mesh.export(output_filepath)
-        
         animated_vertices_list.append(rotated_vertices)
 
-    # salva il file .npy completo per poterlo usare con render_npy.py
+    # Salva il file .npy completo per il rendering
     npy_output_path = os.path.join(output_dir, "mesh_animata.npy")
-    np.array_to_save = np.array(animated_vertices_list)
-    np.save(npy_output_path, np.array_to_save)
-    print(f"  Vertici animati salvati in: {npy_output_path} (shape: {np.array_to_save.shape})")
+    arr_to_save = np.array(animated_vertices_list)
+    np.save(npy_output_path, arr_to_save)
+    print(f"  ✓ Vertici animati salvati in: {npy_output_path} (shape: {arr_to_save.shape})")
 
     return min_frames
 
 
+# ─────────────────────────────────────────────
+# Main
+# ─────────────────────────────────────────────
+
 def main():
     parser = argparse.ArgumentParser(
-        description='S2P Demo: Unisci ScanTalk + Audio2Pose',
+        description='S2P Demo: Pipeline end-to-end ScanTalk + Audio2Pose',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Esempi di utilizzo:
-  # Applica pose predette a mesh ScanTalk
-  python demo_nicco.py --pose_file Results/M034_disgusted_2_001.npy --scantalk_dir scantalk_output
 
-  # Pipeline end-to-end: da audio a mesh ruotate
-  python demo_nicco.py --audio test.wav --scantalk_dir scantalk_output --checkpoint Saves/best_audio2pose.pth
+  # Pipeline completa automatica (ScanTalk + Audio2Pose):
+  python demo_nicco.py \\
+      --audio /path/to/audio.wav \\
+      --checkpoint Saves/best_audio2pose.pth \\
+      --scantalk_src /mnt/.../ScanTalk/src \\
+      --scantalk_model /mnt/.../scantalk_masked_velocity_loss.pth.tar \\
+      --actor_file /mnt/.../ScanTalk/src/examples/FLAME_sample.ply \\
+      --output_dir Demo_Finale
 
-  # Applica pose a vertici .npy 
-  python demo_nicco.py --pose_file Results/M034_disgusted_2_001.npy --vertices_npy scantalk_vertices.npy
+  # ScanTalk già calcolato (salta il passo 1):
+  python demo_nicco.py \\
+      --audio /path/to/audio.wav \\
+      --checkpoint Saves/best_audio2pose.pth \\
+      --scantalk_dir /path/alla/cartella/scantalk \\
+      --output_dir Demo_Finale
+
+  # Solo applica pose pre-calcolate a mesh pre-calcolate:
+  python demo_nicco.py \\
+      --pose_file Results/M034.npy \\
+      --scantalk_dir scantalk_output \\
+      --output_dir Demo_Finale
         """
     )
 
-    # input
+    # ── Input Audio ──────────────────────────────────────
     parser.add_argument("--audio", type=str, default=None,
-                        help="File audio .wav (per modalità end-to-end)")
+                        help="File audio .wav di input")
     parser.add_argument("--pose_file", type=str, default=None,
-                        help="File .npy con le pose predette (shape N_frames x 3)")
+                        help="File .npy con pose già calcolate (N_frames x 3). "
+                             "Se fornito, salta Audio2Pose.")
+
+    # ── ScanTalk (auto) ───────────────────────────────────
+    parser.add_argument("--scantalk_src", type=str, default=None,
+                        help="Path alla cartella src/ di ScanTalk "
+                             "(es. /mnt/.../ScanTalk/src). "
+                             "Necessario per la pipeline automatica.")
+    parser.add_argument("--scantalk_model", type=str, default=None,
+                        help="Path al checkpoint ScanTalk (.pth.tar). "
+                             "Necessario per la pipeline automatica.")
+    parser.add_argument("--actor_file", type=str, default=None,
+                        help="Path al template PLY (es. FLAME_sample.ply). "
+                             "Necessario per la pipeline automatica.")
+
+    # Iperparametri DiffusionNet (usati internamente da ScanTalk — non cambiare)
+    parser.add_argument("--latent_channels", type=int, default=32)
+    parser.add_argument("--in_channels",     type=int, default=3)
+    parser.add_argument("--out_channels",    type=int, default=3)
+    parser.add_argument("--lstm_layers",     type=int, default=3)
+
+    # ── ScanTalk (manuale, se già calcolato) ──────────────
     parser.add_argument("--scantalk_dir", type=str, default=None,
-                        help="Cartella output ScanTalk (con Meshes/ e Images/)")
+                        help="Cartella output ScanTalk già esistente (con Meshes/). "
+                             "Se fornito, ScanTalk NON viene rieseguito.")
     parser.add_argument("--vertices_npy", type=str, default=None,
-                        help="File .npy con vertici ScanTalk (shape N_frames x V x 3)")
+                        help="File .npy con vertici ScanTalk (N_frames x V x 3). "
+                             "Alternativa a --scantalk_dir.")
 
-    # output
-    parser.add_argument("--output_dir", type=str, default="Demo_Finale",
-                        help="Dove salvare le mesh ruotate")
-    parser.add_argument("--render_video", action="store_true",
-                        help="Genera anche un video .mp4 delle mesh (richiede pyrender)")
-    parser.add_argument("--fps", type=int, default=30,
-                        help="FPS del video di output")
-
-    # modello (per modalità end-to-end)
+    # ── Audio2Pose ────────────────────────────────────────
     parser.add_argument("--checkpoint", type=str, default="Saves/best_audio2pose.pth",
-                        help="Path al checkpoint del modello (per --audio)")
+                        help="Path al checkpoint Audio2Pose (.pth)")
     parser.add_argument("--device", type=str,
                         default="cuda" if __import__('torch').cuda.is_available() else "cpu")
 
+    # ── Output ────────────────────────────────────────────
+    parser.add_argument("--output_dir", type=str, default="Demo_Finale",
+                        help="Cartella dove salvare le mesh finali (labbra + testa)")
+    parser.add_argument("--fps", type=int, default=30,
+                        help="FPS del video (usato dal renderer esterno)")
+
     args = parser.parse_args()
 
-    # validaztion di input
+    # ── Validazione input ─────────────────────────────────
     if args.audio is None and args.pose_file is None:
-        parser.error("Serve almeno uno tra --audio e --pose_file")
+        parser.error("Serve almeno uno tra --audio e --pose_file.")
 
-    if args.scantalk_dir is None and args.vertices_npy is None:
-        parser.error("Serve almeno uno tra --scantalk_dir e --vertices_npy")
+    scantalk_already_done = (args.scantalk_dir is not None or args.vertices_npy is not None)
 
-    # prendi le rotazioni
-    if args.pose_file:
-        print(f"\n Caricamento pose da: {args.pose_file}")
-        rotations = np.load(args.pose_file)
-        print(f"   Shape: {rotations.shape}")
+    if not scantalk_already_done and args.audio is not None:
+        # Modalità pipeline automatica: ScanTalk va eseguito
+        missing = []
+        if args.scantalk_src   is None: missing.append("--scantalk_src")
+        if args.scantalk_model is None: missing.append("--scantalk_model")
+        if args.actor_file     is None: missing.append("--actor_file")
+        if missing:
+            parser.error(
+                f"Per la pipeline automatica servono: {', '.join(missing)}\n"
+                f"Oppure passa --scantalk_dir se ScanTalk è già stato eseguito."
+            )
+
+    print(f"\n{'='*60}")
+    print(f"  S2P — Pipeline end-to-end")
+    print(f"  Device: {args.device}")
+    print(f"  Output: {args.output_dir}")
+    print(f"{'='*60}")
+
+    os.makedirs(args.output_dir, exist_ok=True)
+
+    # ── STEP 1: ScanTalk ──────────────────────────────────
+    if scantalk_already_done:
+        print(f"\n  [STEP 1] Mesh ScanTalk già presenti — caricamento da disco...")
+        if args.scantalk_dir:
+            meshes, _ = load_scantalk_meshes(args.scantalk_dir)
+            items = meshes
+        else:
+            items = load_vertices_npy(args.vertices_npy)
+        mesh_faces = None
     else:
-        # end-to-end mode: predici le pose dall'audio
-        print(f"\n end-to-end mode: predizione pose da audio")
-        print(f"   Audio: {args.audio}")
-
-        from utils import predict_pose_from_audio
-        from model import HeadPosePredictor
-        import torch
-
-        # carica il modello
-        model = HeadPosePredictor()
-        model.load_state_dict(
-            torch.load(args.checkpoint, map_location=args.device)
+        # Esegui ScanTalk in automatico, salva nella sottocartella scantalk_meshes/
+        scantalk_output_dir = os.path.join(args.output_dir, "scantalk_meshes")
+        meshes_dir = run_scantalk(
+            audio_path=args.audio,
+            actor_file=args.actor_file,
+            scantalk_model_path=args.scantalk_model,
+            output_dir=scantalk_output_dir,
+            device=args.device,
+            scantalk_src=args.scantalk_src,
+            in_channels=args.in_channels,
+            out_channels=args.out_channels,
+            latent_channels=args.latent_channels,
+            lstm_layers=args.lstm_layers,
         )
-        model = model.to(args.device)
-        model.eval()
-
-        rotations = predict_pose_from_audio(
-            model, args.audio, device=args.device
-        )
-        print(f"   Pose predette: {rotations.shape}")
-
-        # salva le pose predette
-        pose_save = os.path.join(args.output_dir, "predicted_pose.npy")
-        os.makedirs(args.output_dir, exist_ok=True)
-        np.save(pose_save, rotations)
-        print(f"   Pose salvate in: {pose_save}")
-
-    # carica le mesh di scantalk
-    mesh_faces = None
-    if args.scantalk_dir:
-        meshes, mesh_files = load_scantalk_meshes(args.scantalk_dir)
+        meshes, _ = load_scantalk_meshes(scantalk_output_dir)
         items = meshes
-    else:
-        vertex_list = load_vertices_npy(args.vertices_npy)
-        items = vertex_list
-        # per vertici nudi servirebbero le facce — ma salvando come PointCloud funziona
+        mesh_faces = None
 
-    # applica le rotazioni
+    # ── STEP 2: Audio2Pose ────────────────────────────────
+    if args.pose_file:
+        print(f"\n  [STEP 2] Caricamento pose pre-calcolate da: {args.pose_file}")
+        rotations = np.load(args.pose_file)
+        print(f"  Shape: {rotations.shape}")
+    else:
+        rotations = predict_head_rotations(
+            audio_path=args.audio,
+            checkpoint_path=args.checkpoint,
+            device=args.device,
+        )
+        # Salva le pose predette per riferimento futuro
+        pose_save = os.path.join(args.output_dir, "predicted_pose.npy")
+        np.save(pose_save, rotations)
+        print(f"  Pose salvate in: {pose_save}")
+
+    # ── STEP 3: Fusione ───────────────────────────────────
     n_processed = apply_rotations(
         items, rotations, args.output_dir, mesh_faces=mesh_faces
     )
 
-    print(f"\n Cerchio completato! {n_processed} mesh finali (Labbra + Testa) "
-          f"salvate in: {args.output_dir}")
+    print(f"\n{'='*60}")
+    print(f"  Pipeline completata!")
+    print(f"  {n_processed} mesh finali (labbra animate + testa in movimento)")
+    print(f"  salvate in: {args.output_dir}")
+    print(f"  Per il video, lancia il tuo script di rendering su: {args.output_dir}/mesh_animata.npy")
+    print(f"{'='*60}\n")
+
 
 if __name__ == "__main__":
     main()
