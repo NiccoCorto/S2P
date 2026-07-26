@@ -72,7 +72,9 @@ def run_scantalk(audio_path, actor_file, scantalk_model_path, output_dir, device
     print(f"  Actor:   {actor_file}")
     print(f"  Modello: {scantalk_model_path}")
 
-    # Aggiunge il path sorgente di ScanTalk a sys.path per gli import
+    # Aggiunge scantalk_src a sys.path solo per importare 'hubert' e 'diffusion_net'.
+    # Questi nomi non confliggono con nessun modulo di S2P — nessuna manipolazione
+    # di sys.modules necessaria.
     if scantalk_src is not None:
         if scantalk_src not in sys.path:
             sys.path.insert(0, scantalk_src)
@@ -80,33 +82,81 @@ def run_scantalk(audio_path, actor_file, scantalk_model_path, output_dir, device
         if os.path.isdir(diffnet_path) and diffnet_path not in sys.path:
             sys.path.insert(0, diffnet_path)
 
-    # IMPORTANTE: S2P/Audio2Pose/ contiene un file 'model.py' (HeadPosePredictor)
-    # che confligge con il package 'model/' di ScanTalk (model.scantalk).
-    # Lo rimuoviamo temporaneamente da sys.path durante l'import di ScanTalk,
-    # e lo riaggiungiamo subito dopo per non rompere gli altri import.
-    audio2pose_dir = os.path.dirname(os.path.abspath(__file__))
-    _path_was_present = audio2pose_dir in sys.path
-    if _path_was_present:
-        sys.path.remove(audio2pose_dir)
+    import torch
+    import torch.nn as nn
+    import librosa
+    from transformers import Wav2Vec2Processor
 
     try:
-        import torch
-        import librosa
-        from transformers import Wav2Vec2Processor
-        from model.scantalk import ScanTalk
         import diffusion_net
+        from hubert.modeling_hubert import HubertModel
     except ImportError as e:
         raise ImportError(
-            f"Impossibile importare i moduli di ScanTalk: {e}\n"
-            f"Verifica che --scantalk_src punti alla cartella src/ di ScanTalk "
-            f"e che tutti i requirements di ScanTalk siano installati."
+            f"Impossibile importare hubert o diffusion_net: {e}\n"
+            f"Verifica che --scantalk_src punti alla cartella src/ di ScanTalk."
         )
-    finally:
-        # Riaggiungi sempre Audio2Pose/ a sys.path (necessario per model.py di S2P)
-        if _path_was_present and audio2pose_dir not in sys.path:
-            sys.path.insert(0, audio2pose_dir)
 
-    import torch
+    # ── Classe ScanTalk embeddada direttamente ──────────────────────────────
+    # Copiata da ScanTalk/src/model/scantalk.py per evitare il conflitto di
+    # nome con model.py di Audio2Pose (entrambi si chiamano 'model').
+    class ScanTalk(nn.Module):
+        def __init__(self, in_channels, out_channels, latent_channels, lstm_layers):
+            super(ScanTalk, self).__init__()
+            self.audio_encoder = HubertModel.from_pretrained(
+                "/mnt/diskone-second/ncortini/hubert-base"
+            )
+            self.audio_encoder.feature_extractor._freeze_parameters()
+            self.encoder = diffusion_net.layers.DiffusionNet(
+                C_in=in_channels, C_out=latent_channels,
+                C_width=latent_channels, N_block=4,
+                outputs_at='vertices', dropout=False
+            )
+            self.decoder = diffusion_net.layers.DiffusionNet(
+                C_in=latent_channels * 2, C_out=out_channels,
+                C_width=latent_channels, N_block=4,
+                outputs_at='vertices', dropout=False
+            )
+            nn.init.constant_(self.decoder.last_lin.weight, 0)
+            nn.init.constant_(self.decoder.last_lin.bias, 0)
+            self.audio_embedding = nn.Linear(768, latent_channels)
+            self.lstm = nn.LSTM(
+                input_size=latent_channels,
+                hidden_size=int(latent_channels / 2),
+                num_layers=lstm_layers,
+                batch_first=True, bidirectional=True
+            )
+
+        def predict(self, audio, actor, mass, L, evals, evecs, gradX, gradY,
+                    faces, dataset, hks=None):
+            hidden_states = self.audio_encoder(audio, dataset).last_hidden_state
+            audio_emb = self.audio_embedding(hidden_states)
+            src = hks if hks is not None else actor
+            actor_vertices_emb = self.encoder(
+                src, mass=mass, L=L, evals=evals, evecs=evecs,
+                gradX=gradX, gradY=gradY, faces=faces
+            )
+            latent, _ = self.lstm(audio_emb)
+            combination = torch.cat([
+                actor_vertices_emb.expand(
+                    1, latent.shape[1], actor_vertices_emb.shape[1], actor_vertices_emb.shape[2]
+                ),
+                latent.unsqueeze(2).expand(
+                    1, latent.shape[1], actor_vertices_emb.shape[1], latent.shape[2]
+                )
+            ], dim=-1).squeeze(0)
+            mass  = mass.expand(latent.shape[1], mass.shape[1])
+            L     = L.to_dense().expand(latent.shape[1], L.shape[1], L.shape[2])
+            evals = evals.expand(latent.shape[1], evals.shape[1])
+            evecs = evecs.expand(latent.shape[1], evecs.shape[1], evecs.shape[2])
+            gradX = gradX.to_dense().expand(latent.shape[1], gradX.shape[1], gradX.shape[2])
+            gradY = gradY.to_dense().expand(latent.shape[1], gradY.shape[1], gradY.shape[2])
+            faces = faces.expand(latent.shape[1], faces.shape[1], faces.shape[2])
+            pred_disp = self.decoder(
+                combination, mass=mass, L=L, evals=evals, evecs=evecs,
+                gradX=gradX, gradY=gradY, faces=faces
+            )
+            return pred_disp + actor
+    # ────────────────────────────────────────────────────────────────────────
 
     # Crea le sottocartelle di output
     meshes_dir = os.path.join(output_dir, "Meshes")
@@ -116,7 +166,7 @@ def run_scantalk(audio_path, actor_file, scantalk_model_path, output_dir, device
     print("\n  Caricamento HuBERT processor...")
     processor = Wav2Vec2Processor.from_pretrained("facebook/hubert-xlarge-ls960-ft")
 
-    # Carica il modello ScanTalk
+    # Carica il modello ScanTalk con i pesi dal checkpoint
     print("  Caricamento modello ScanTalk...")
     scantalk_model = ScanTalk(in_channels, out_channels, latent_channels, lstm_layers).to(device)
     checkpoint = torch.load(scantalk_model_path, map_location=device)
@@ -134,7 +184,7 @@ def run_scantalk(audio_path, actor_file, scantalk_model_path, output_dir, device
     print(f"  Caricamento template mesh: {actor_file}")
     actor = trimesh.load(actor_file, process=False)
     actor_vertices = actor.vertices
-    actor_faces = actor.faces
+    actor_faces    = actor.faces
     actor_vertices_t = torch.FloatTensor(actor_vertices).to(device=device).unsqueeze(0)
 
     # Genera la sequenza di mesh animate
@@ -145,12 +195,12 @@ def run_scantalk(audio_path, actor_file, scantalk_model_path, output_dir, device
             faces=torch.tensor(actor_faces),
             k_eig=128
         )
-        mass    = torch.FloatTensor(np.array(mass)).float().to(device).unsqueeze(0)
-        evals   = torch.FloatTensor(np.array(evals)).to(device).unsqueeze(0)
-        evecs   = torch.FloatTensor(np.array(evecs)).to(device).unsqueeze(0)
-        L       = L.float().to(device).unsqueeze(0)
-        gradX   = gradX.float().to(device).unsqueeze(0)
-        gradY   = gradY.float().to(device).unsqueeze(0)
+        mass          = torch.FloatTensor(np.array(mass)).float().to(device).unsqueeze(0)
+        evals         = torch.FloatTensor(np.array(evals)).to(device).unsqueeze(0)
+        evecs         = torch.FloatTensor(np.array(evecs)).to(device).unsqueeze(0)
+        L             = L.float().to(device).unsqueeze(0)
+        gradX         = gradX.float().to(device).unsqueeze(0)
+        gradY         = gradY.float().to(device).unsqueeze(0)
         actor_faces_t = torch.tensor(actor_faces).to(device).float().unsqueeze(0)
 
         gen_seq = scantalk_model.predict(
