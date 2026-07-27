@@ -41,9 +41,9 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 
-# ─────────────────────────────────────────────
-# STEP 1: ScanTalk — anima le labbra
-# ─────────────────────────────────────────────
+
+# ScanTalk — anima le labbra
+
 
 def run_scantalk(audio_path, actor_file, scantalk_model_path, output_dir, device,
                  scantalk_src=None,
@@ -222,9 +222,9 @@ def run_scantalk(audio_path, actor_file, scantalk_model_path, output_dir, device
     return meshes_dir
 
 
-# ─────────────────────────────────────────────
-# STEP 2: Audio2Pose — predici le rotazioni
-# ─────────────────────────────────────────────
+
+# Audio2Pose — predici le rotazioni
+
 
 def predict_head_rotations(audio_path, checkpoint_path, device):
     """Predice le rotazioni della testa (Pitch, Yaw, Roll) dall'audio.
@@ -257,9 +257,9 @@ def predict_head_rotations(audio_path, checkpoint_path, device):
     return rotations
 
 
-# ─────────────────────────────────────────────
+
 # Caricamento mesh ScanTalk da cartella
-# ─────────────────────────────────────────────
+
 
 def load_scantalk_meshes(scantalk_dir):
     """Carica le mesh .ply generate da ScanTalk dalla cartella Meshes/.
@@ -302,9 +302,9 @@ def load_vertices_npy(npy_path):
     return [vertices[i] for i in range(vertices.shape[0])]
 
 
-# ─────────────────────────────────────────────
-# STEP 3: Fusione — applica rotazioni alle mesh
-# ─────────────────────────────────────────────
+
+# Fusione — applica rotazioni alle mesh
+
 
 def apply_rotations(meshes_or_vertices, rotations, output_dir, mesh_faces=None,
                     pivot_origin=True):
@@ -376,9 +376,9 @@ def apply_rotations(meshes_or_vertices, rotations, output_dir, mesh_faces=None,
     return min_frames
 
 
-# ─────────────────────────────────────────────
+
 # Main
-# ─────────────────────────────────────────────
+
 
 def main():
     parser = argparse.ArgumentParser(
@@ -484,7 +484,7 @@ Esempi di utilizzo:
 
     os.makedirs(args.output_dir, exist_ok=True)
 
-    # ── STEP 1: ScanTalk ──────────────────────────────────
+    # ScanTalk 
     if scantalk_already_done:
         print(f"\n  [STEP 1] Mesh ScanTalk già presenti — caricamento da disco...")
         if args.scantalk_dir:
@@ -512,7 +512,7 @@ Esempi di utilizzo:
         items = meshes
         mesh_faces = None
 
-    # ── STEP 2: Audio2Pose ────────────────────────────────
+    # Audio2Pose 
     if args.pose_file:
         print(f"\n  [STEP 2] Caricamento pose pre-calcolate da: {args.pose_file}")
         rotations = np.load(args.pose_file)
@@ -528,7 +528,7 @@ Esempi di utilizzo:
         np.save(pose_save, rotations)
         print(f"  Pose salvate in: {pose_save}")
 
-    # ── STEP 3: Fusione ───────────────────────────────────
+    # Fusione 
     n_processed = apply_rotations(
         items, rotations, args.output_dir, mesh_faces=mesh_faces
     )

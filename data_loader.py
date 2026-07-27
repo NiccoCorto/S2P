@@ -12,6 +12,7 @@ import numpy as np
 from tqdm import tqdm
 from transformers import Wav2Vec2Processor
 import librosa
+from scipy.signal import savgol_filter
 
 
 class PoseDataset(data.Dataset):
@@ -105,6 +106,13 @@ def read_data(args):
                 skipped += 1
                 continue
 
+            # mitigazione jittering: filtro passa-basso Savitzky-Golay sulle rotazioni
+            # parametri: window_length=9 frame @ 30 FPS → finestra di ~300ms
+            #            polyorder=2 (polinomio di grado 2, buon compromesso smoothing/f# edeltà)
+            # apply along axis=0 (temporale) su tutti e 3 gli angoli simultaneamente
+            if pose_data.shape[0] > 9:  # il filtro richiede almeno window_length campioni
+                pose_data = savgol_filter(pose_data, window_length=9, polyorder=2, axis=0)
+
             # allineamento temporale audio ↔ pose
             # NON tagliamo l'audio: lo passiamo intero al Wav2Vec2.
             # Sarà l'interpolazione nel forward() del modello (target_seq_len)
@@ -185,6 +193,41 @@ def read_data(args):
     return train_data, valid_data, test_data, subjects_dict
 
 
+def collate_fn(batch):
+    """Funzione di collation custom per gestire sequenze audio e pose di lunghezza variabile.
+
+    Necessaria per supportare batch_size > 1: le sequenze audio (raw waveform a 16kHz)
+    e le sequenze pose (N_frames, 3) hanno lunghezze diverse tra campioni.
+    La strategia è il padding a zero alla lunghezza massima del batch.
+
+    Il modello gestisce già le sequenze di lunghezza variabile tramite l'interpolazione
+    nel forward() (target_seq_len), quindi il padding non altera la logica di training.
+
+    Args:
+        batch: lista di tuple (audio_tensor, pose_tensor, file_name)
+
+    Returns:
+        padded_audio:  Tensor (B, max_audio_len)    — audio paddato a zero
+        padded_pose:   Tensor (B, max_pose_len, 3) — pose paddate a zero
+        names:         list[str]                   — nomi dei file nel batch
+    """
+    audios, poses, names = zip(*batch)
+
+    # padding audio alla lunghezza massima nel batch
+    max_audio_len = max(a.shape[0] for a in audios)
+    padded_audio = torch.zeros(len(audios), max_audio_len)
+    for i, a in enumerate(audios):
+        padded_audio[i, :a.shape[0]] = a
+
+    # padding pose alla lunghezza massima nel batch
+    max_pose_len = max(p.shape[0] for p in poses)
+    padded_pose = torch.zeros(len(poses), max_pose_len, 3)
+    for i, p in enumerate(poses):
+        padded_pose[i, :p.shape[0], :] = p
+
+    return padded_audio, padded_pose, list(names)
+
+
 def get_dataloaders(args):
     """Crea i DataLoader per train, validation e test.
     
@@ -199,21 +242,24 @@ def get_dataloaders(args):
 
     batch_size = getattr(args, "batch_size", 1)
 
-    # dataloader per il train (con shuffle=True per mescolare i dati)
+    # dataloader per il train (con shuffle=True e collate_fn per batch_size > 1)
     train_dataset = PoseDataset(train_data, "train")
     dataset["train"] = data.DataLoader(
-        dataset=train_dataset, batch_size=batch_size, shuffle=True
+        dataset=train_dataset, batch_size=batch_size, shuffle=True,
+        collate_fn=collate_fn
     )
 
-    # dataloader per validation e test (shuffle=False)
+    # dataloader per validation e test (shuffle=False, collate_fn per consistenza)
     valid_dataset = PoseDataset(valid_data, "val")
     dataset["valid"] = data.DataLoader(
-        dataset=valid_dataset, batch_size=batch_size, shuffle=False
+        dataset=valid_dataset, batch_size=batch_size, shuffle=False,
+        collate_fn=collate_fn
     )
 
     test_dataset = PoseDataset(test_data, "test")
     dataset["test"] = data.DataLoader(
-        dataset=test_dataset, batch_size=batch_size, shuffle=False
+        dataset=test_dataset, batch_size=batch_size, shuffle=False,
+        collate_fn=collate_fn
     )
 
     return dataset

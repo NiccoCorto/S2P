@@ -22,8 +22,11 @@ class HeadPosePredictor(nn.Module):
 
         # iperparametri (da args o default)
         hidden_dim = getattr(args, "hidden_dim", 256) if args else 256
+        # num_layers: default 2. Aumentare a 3-4 per catturare pattern temporali più complessi
+        # (consigliato con dataset grande come EMOTE — sperimentare con --num_layers 3 o 4)
         num_layers = getattr(args, "num_layers", 2) if args else 2
-        dropout = getattr(args, "dropout", 0.2) if args else 0.2
+        # dropout al valore PyTorch di default (0.1) — allineato con config.py
+        dropout = getattr(args, "dropout", 0.1) if args else 0.1
 
         # Audio Encoder (Wav2Vec2) — completamente frozen (no fine-tuning)
         # tutti i parametri (CNN feature extractor + tutti i transformer blocks)

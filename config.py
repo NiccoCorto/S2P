@@ -40,8 +40,8 @@ def get_args():
                         help="Dimensione hidden LSTM")
     parser.add_argument("--num_layers", type=int, default=2,
                         help="Numero di layer LSTM")
-    parser.add_argument("--dropout", type=float, default=0.4,
-                        help="Dropout tra LSTM e FC")
+    parser.add_argument("--dropout", type=float, default=0.1,
+                        help="Dropout tra LSTM e FC (default PyTorch: 0.1)")
 
     # iperparametri training
     parser.add_argument("--lr", type=float, default=0.0001,
@@ -49,11 +49,12 @@ def get_args():
     parser.add_argument("--max_epoch", type=int, default=200,
                         help="Numero massimo di epoche")
     parser.add_argument("--batch_size", type=int, default=1,
-                        help="Batch size (1 perché sequenze di lunghezza variabile)")
+                        help="Batch size (supportato > 1 grazie alla collate_fn con padding audio/pose)")
     parser.add_argument("--patience", type=int, default=200,
                         help="Epoche senza miglioramento prima di early stopping")
-    parser.add_argument("--vel_loss_weight", type=float, default=1.0,
-                        help="Peso della velocity loss rispetto alla position loss")
+    parser.add_argument("--vel_loss_weight", type=float, default=0.0,
+                        help="Peso della velocity loss (0 = disabilitata per test overfitting; "
+                             "2044 = normalizzata alla stessa magnitudo di pos_loss)")
 
     # dati
     parser.add_argument("--max_samples", type=int, default=None,

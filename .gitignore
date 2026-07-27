@@ -15,6 +15,7 @@ __pycache__/
 *.mp4
 *.pth
 *.pkl
+*.out
 # ==========================================
 # 3. CARTELLE DI OUTPUT DI S2P (DATI REALI)
 # Ignorate per non intasare GitHub con i risultati
