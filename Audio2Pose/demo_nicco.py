@@ -247,8 +247,25 @@ def predict_head_rotations(audio_path, checkpoint_path, device):
     from model import HeadPosePredictor
     import torch
 
-    model = HeadPosePredictor()
-    model.load_state_dict(torch.load(checkpoint_path, map_location=device))
+    # Deriva l'architettura ispezionando il checkpoint — robusto a qualsiasi nome cartella
+    sd = torch.load(checkpoint_path, map_location=device)
+    # weight_ih_l0 shape = (4 * hidden_size, input_size)
+    hidden_dim = sd['lstm.weight_ih_l0'].shape[0] // 4
+    # num_layers = indice massimo di layer trovato + 1
+    num_layers = max(
+        int(k.split('lstm.weight_ih_l')[1].split('_')[0])
+        for k in sd if k.startswith('lstm.weight_ih_l') and '_reverse' not in k
+    ) + 1
+    print(f"  Architettura rilevata dal checkpoint: {num_layers}L  hidden={hidden_dim}")
+
+    class _Args: pass
+    _args = _Args()
+    _args.num_layers = num_layers
+    _args.hidden_dim = hidden_dim
+    _args.dropout    = 0.0
+
+    model = HeadPosePredictor(_args)
+    model.load_state_dict(sd)
     model = model.to(device)
     model.eval()
 

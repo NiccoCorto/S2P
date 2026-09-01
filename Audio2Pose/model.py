@@ -54,15 +54,17 @@ class HeadPosePredictor(nn.Module):
         # output: 3 valori (Pitch, Yaw, Roll) — compatibili con cv2.Rodrigues()
         self.fc = nn.Linear(hidden_dim * 2, 3)  # *2 perché bidirezionale
 
-    def forward(self, audio_input, target_seq_len=None):
+    def forward(self, audio_input, pose_lengths=None):
         """
         Args:
-            audio_input: Tensor audio raw (Batch, Samples) pre-processato da Wav2Vec2Processor
-            target_seq_len: Numero di frame del video target. Se specificato,
-                           interpola le features audio per allinearsi esattamente.
-        
+            audio_input:  Tensor audio raw (Batch, Samples) pre-processato da Wav2Vec2Processor
+            pose_lengths: LongTensor (Batch,) con la lunghezza reale (pre-padding) di ogni
+                          sequenza pose nel batch. Se specificato, le feature audio vengono
+                          interpolate alla lunghezza del campione più lungo (max reale, non padded),
+                          garantendo che frame paddati non vengano mai predetti né inclusi in loss.
+
         Returns:
-            pose_pred: (Batch, target_seq_len, 3) — Pitch, Yaw, Roll per frame
+            pose_pred: (Batch, max_real_len, 3) — Pitch, Yaw, Roll per frame
         """
         # estrai le feature dall'audio (escono a ~50 FPS)
         with torch.no_grad():
@@ -71,14 +73,19 @@ class HeadPosePredictor(nn.Module):
         # layer normalization
         features = self.layer_norm(features)
 
-        # interpolazione lineare (la "magia di Federico")
-        # se sappiamo quanti frame ha il video, "stiriamo" l'audio per renderlo identico
-        if target_seq_len is not None and features.size(1) != target_seq_len:
+        # interpolazione lineare verso la lunghezza reale massima del batch
+        # pose_lengths.max() = lunghezza del campione più lungo (nessun padding aggiunto sopra)
+        if pose_lengths is not None:
+            target_len = int(pose_lengths.max().item())
+        else:
+            target_len = features.size(1)
+
+        if features.size(1) != target_len:
             features = features.transpose(1, 2)  # (B, 768, Seq_Audio)
             features = F.interpolate(
-                features, size=target_seq_len, mode='linear', align_corners=True
+                features, size=target_len, mode='linear', align_corners=True
             )
-            features = features.transpose(1, 2)  # (B, target_seq_len, 768)
+            features = features.transpose(1, 2)  # (B, target_len, 768)
 
         # lstm
         lstm_out, _ = self.lstm(features)
@@ -87,6 +94,6 @@ class HeadPosePredictor(nn.Module):
         lstm_out = self.dropout(lstm_out)
 
         # output: 3 angoli per frame
-        pose_pred = self.fc(lstm_out)  # (B, Seq, 3)
+        pose_pred = self.fc(lstm_out)  # (B, max_real_len, 3)
 
         return pose_pred

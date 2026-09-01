@@ -141,12 +141,14 @@ def render_vertices_to_video(vertices_array, faces, audio_path, out_video_path, 
     writer.release()
 
     # attacca l'audio con ffmpeg
+    # -shortest: tronca alla traccia più corta → nessun silenzio/frame congelato in coda
+    # -ar rimosso: manteniamo 16kHz (lo stesso SR usato da Wav2Vec) senza ricampionamento
     cmd = (
         '/usr/bin/ffmpeg -y '
         f'-i {audio_path} '
         f'-i {tmp_video.name} '
         '-vcodec h264 -ac 2 -channel_layout stereo '
-        f'-pix_fmt yuv420p -ar 22050 {out_video_path}'
+        f'-pix_fmt yuv420p -shortest {out_video_path}'
     ).split()
     call(cmd)
     os.remove(tmp_video.name)
@@ -212,10 +214,24 @@ def run_experiment(exp_name, vel_label, args):
     #  1. carica checkpoint dell'ultima epoca 
     checkpoint_path = find_last_epoch_checkpoint(args.saves_dir, exp_name)
 
-    # 2. carica il modello Audio2Pose 
+    # 2. carica il modello Audio2Pose — architettura rilevata dal checkpoint
     print("  Caricamento modello Audio2Pose...")
-    model = HeadPosePredictor()
-    model.load_state_dict(torch.load(checkpoint_path, map_location=args.device))
+    sd = torch.load(checkpoint_path, map_location=args.device)
+    # weight_ih_l0 shape = (4 * hidden_size, input_size)
+    _hidden_dim = sd['lstm.weight_ih_l0'].shape[0] // 4
+    _num_layers = max(
+        int(k.split('lstm.weight_ih_l')[1].split('_')[0])
+        for k in sd if k.startswith('lstm.weight_ih_l') and '_reverse' not in k
+    ) + 1
+    print(f"  Architettura rilevata dal checkpoint: {_num_layers}L  hidden={_hidden_dim}")
+
+    class ModelArgs: pass
+    m_args = ModelArgs()
+    m_args.num_layers = _num_layers
+    m_args.hidden_dim = _hidden_dim
+    m_args.dropout    = 0.0
+    model = HeadPosePredictor(m_args)
+    model.load_state_dict(sd)
     model = model.to(args.device)
     model.eval()
 
@@ -230,32 +246,46 @@ def run_experiment(exp_name, vel_label, args):
     print(f"  vertices (statici):  {vertices_static.shape}")
     print(f"  vertices_pose (GT):  {vertices_pose.shape}")
 
-    # ── 3.5 Allinea e trimma l'audio ai frame effettivi ───────────────────
+    # ── 3.5 Carica l'audio INTERO a 16kHz (nessun trim manuale pre-Wav2Vec) ───
+    # Bug #1 fix: NON tagliare l'audio prima che Wav2Vec lo veda.
+    # target_frames = lunghezza GT (vertices_pose) → il modello interpola via forward().
+    # Il trim dell'audio per il muxing video avviene DOPO l'inferenza,
+    # basandosi su n_frames effettivi restituiti da Wav2Vec.
     import soundfile as sf
-    n_target_frames = vertices_static.shape[0]
-    
-    # Carichiamo l'audio e lo trimmiamo esattamente come fa data_loader.py in fase di addestramento
     audio_data, sr = librosa.load(args.audio, sr=16000)
-    expected_samples = int(n_target_frames / args.fps * sr)
-    audio_data = audio_data[:expected_samples]
-    
-    # Salviamo l'audio trimmato per usarlo nel rendering e nella predizione
-    trimmed_audio_path = os.path.join(out_subdir, "trimmed_audio.wav")
-    sf.write(trimmed_audio_path, audio_data, sr)
+    n_gt_frames = vertices_pose.shape[0]  # lunghezza canonica: GT pose
 
-    #  4. Predici le rotazioni dall'audio 
-    print("  Predizione rotazioni testa dall'audio (trimmato)...")
+    #  4. Predici le rotazioni dall'audio INTERO 
+    print(f"  Predizione rotazioni testa dall'audio intero (target_frames={n_gt_frames})...")
     rotations = predict_pose_from_audio(
-        model, trimmed_audio_path, device=args.device, target_frames=n_target_frames
+        model, args.audio, device=args.device, target_frames=n_gt_frames
     )
     print(f"  Rotazioni predette: {rotations.shape}")
 
     # salva le pose predette 
     np.save(os.path.join(out_subdir, "predicted_pose.npy"), rotations)
 
-    #  5. Applica la rotazione ai vertici statici ScanTalk 
+    #  5. Bug #3 fix: calcola n_frames con warning esplicito se c'è mismatch ─────
+    n_scantalk = vertices_static.shape[0]
+    n_pose     = rotations.shape[0]
+    if n_scantalk != n_pose:
+        delta = n_scantalk - n_pose
+        print(f"  [WARN] Mismatch frame: ScanTalk={n_scantalk}, pose predette={n_pose} "
+              f"(Δ={delta:+d} frame, ~{abs(delta)/args.fps*1000:.1f} ms @ {args.fps}fps). "
+              f"Taglio alla lunghezza minima.")
+    n_frames = min(n_scantalk, n_pose)
+
+    # Trim audio per muxing video: ora avviene DOPO l'inferenza Wav2Vec
+    # usando n_frames effettivi (non un int() pre-calcolato)
+    expected_samples = round(n_frames / args.fps * sr)
+    audio_trimmed    = audio_data[:expected_samples]
+    trimmed_audio_path = os.path.join(out_subdir, "trimmed_audio.wav")
+    sf.write(trimmed_audio_path, audio_trimmed, sr)
+    print(f"  Audio trimmato: {n_frames} frame → {expected_samples} sample "
+          f"({expected_samples/sr:.4f}s @ {sr}Hz)")
+
+    #  5b. Applica la rotazione ai vertici statici ScanTalk 
     print("  Applicazione rotazione testa ai vertici ScanTalk...")
-    n_frames = min(vertices_static.shape[0], rotations.shape[0])
     vertices_rotated = np.zeros((n_frames, vertices_static.shape[1], 3))
 
     for i in range(n_frames):

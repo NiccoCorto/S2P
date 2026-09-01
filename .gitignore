@@ -46,3 +46,18 @@ Logs/
 run_experiments.sh
 run_experiments.sh
 log_*.txt
+
+# ==========================================
+# 6. SCRIPT E FILE MODIFICATI/CREATI IN ROOT
+# ==========================================
+config.py
+data_loader.py
+compute_quantitative_comparison.py
+evaluate_metrics.py
+generate_all_quantitative_folders.py
+generate_isolated_quantitative.py
+generate_quantitative_baseline.py
+run_all_renders.sh
+run_overfit_experiments.sh
+run_resume_overfit_experiments.sh
+run_test_renders_1_to_4.sh

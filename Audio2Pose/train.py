@@ -11,6 +11,7 @@ import sys
 import comet_ml
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from tqdm import tqdm
 
 # aggiungi la cartella principale al path per trovare il dataloader e config
@@ -25,21 +26,53 @@ class PoseLoss(nn.Module):
     Funzione di errore personalizzata per la testa.
     Calcola l'errore sulla posizione esatta (MSE) + l'errore sulla velocità
     del movimento (per renderlo fluido e naturale).
+
+    Supporta una padding mask tramite il parametro `lengths`: i frame paddati
+    (oltre la lunghezza reale di ciascun campione) vengono completamente ignorati
+    sia nella pos_loss che nella vel_loss, evitando che il modello impari a predire
+    zero sui frame di padding (loss poisoning).
     """
     def __init__(self, vel_weight=2.0):
         super(PoseLoss, self).__init__()
-        self.mse = nn.MSELoss()
         self.vel_weight = vel_weight
 
-    def forward(self, predictions, target):
-        # errore di posizione (quanto siamo lontani dagli angoli reali)
-        pos_loss = self.mse(predictions, target)
+    def forward(self, predictions, target, lengths=None):
+        """
+        Args:
+            predictions: Tensor (B, T, 3) — predizioni del modello
+            target:      Tensor (B, T, 3) — pose target (eventualmente paddate a zero)
+            lengths:     LongTensor (B,)  — lunghezza reale di ogni sequenza.
+                         Se None, tutti i frame sono considerati reali (no mask).
+        """
+        B, T, C = target.shape
 
-        # errore di velocità (differenza tra il frame attuale e il precedente)
-        # questo costringe il modello a non fare movimenti "a scatti"
-        prediction_shift = predictions[:, 1:, :] - predictions[:, :-1, :]
-        target_shift = target[:, 1:, :] - target[:, :-1, :]
-        vel_loss = self.mse(prediction_shift, target_shift)
+        # costruisce mask frame-level: True dove il frame è reale (non padding)
+        if lengths is not None:
+            idx = torch.arange(T, device=target.device).unsqueeze(0)  # (1, T)
+            mask_2d = idx < lengths.unsqueeze(1)                       # (B, T)
+        else:
+            mask_2d = torch.ones(B, T, dtype=torch.bool, device=target.device)
+
+        # --- Position Loss: MSE solo sui frame reali ---
+        mask_3d = mask_2d.unsqueeze(-1).expand_as(target)  # (B, T, 3)
+        pred_masked = predictions[mask_3d].view(-1, C)
+        tgt_masked  = target[mask_3d].view(-1, C)
+        pos_loss = F.mse_loss(pred_masked, tgt_masked)
+
+        # --- Velocity Loss: differenze consecutive calcolate prima di appiattire ---
+        # (così non si mescolano frame di sequenze diverse)
+        pred_vel = predictions[:, 1:, :] - predictions[:, :-1, :]  # (B, T-1, C)
+        tgt_vel  = target[:, 1:, :] - target[:, :-1, :]            # (B, T-1, C)
+        # valido solo dove ENTRAMBI i frame consecutivi sono reali
+        vel_mask    = mask_2d[:, 1:] & mask_2d[:, :-1]             # (B, T-1)
+        vel_mask_3d = vel_mask.unsqueeze(-1).expand_as(pred_vel)   # (B, T-1, C)
+
+        if vel_mask_3d.any():
+            pred_vel_m = pred_vel[vel_mask_3d].view(-1, C)
+            tgt_vel_m  = tgt_vel[vel_mask_3d].view(-1, C)
+            vel_loss = F.mse_loss(pred_vel_m, tgt_vel_m)
+        else:
+            vel_loss = torch.tensor(0.0, device=target.device)
 
         # sommiamo gli errori con il peso configurato
         # vel_weight=0 disabilita la velocity loss (solo pos_loss)
@@ -50,14 +83,16 @@ class PoseLoss(nn.Module):
         return total_loss, pos_loss.detach().item(), vel_loss.detach().item()
 
 
-def setup_logging(log_path):
+def setup_logging(log_path, start_epoch=0):
     """Crea la cartella di log e il file CSV per le loss."""
     os.makedirs(log_path, exist_ok=True)
     csv_path = os.path.join(log_path, "training_log.csv")
-    with open(csv_path, "w", newline="") as f:
-        writer = csv.writer(f)
-        writer.writerow(["epoch", "train_loss", "train_pos_loss", "train_vel_loss",
-                         "val_loss", "val_pos_loss", "val_vel_loss", "lr", "best"])
+    mode = "a" if start_epoch > 0 else "w"
+    with open(csv_path, mode, newline="") as f:
+        if mode == "w":
+            writer = csv.writer(f)
+            writer.writerow(["epoch", "train_loss", "train_pos_loss", "train_vel_loss",
+                             "val_loss", "val_pos_loss", "val_vel_loss", "lr", "best"])
     return csv_path
 
 
@@ -74,15 +109,17 @@ def log_epoch(csv_path, epoch, train_loss, train_pos, train_vel,
         ])
 
 
-def trainer(args, train_loader, dev_loader, model, optimizer, criterion, experiment):
+def trainer(args, train_loader, dev_loader, model, optimizer, criterion, experiment, start_epoch=0):
     """Loop di addestramento con early stopping e best model saving."""
     save_path = args.save_path
     os.makedirs(save_path, exist_ok=True)
 
-    csv_path = setup_logging(args.log_path)
+    csv_path = setup_logging(args.log_path, start_epoch)
 
     print(f"\n{'='*60}")
     print(f"Inizio addestramento su {args.device}")
+    if start_epoch > 0:
+        print(f"  Ripresa da epoca: {start_epoch}")
     print(f"  Epoche max:      {args.max_epoch}")
     print(f"  Learning rate:   {args.lr} (FISSO, no scheduler)")
     print(f"  Early stopping:  {args.patience} epoche senza miglioramento")
@@ -97,7 +134,7 @@ def trainer(args, train_loader, dev_loader, model, optimizer, criterion, experim
     best_val_loss = float("inf")
     patience_counter = 0
 
-    for e in range(args.max_epoch):
+    for e in range(start_epoch, args.max_epoch):
         loss_log = []
         pos_loss_log = []
         vel_loss_log = []
@@ -107,21 +144,18 @@ def trainer(args, train_loader, dev_loader, model, optimizer, criterion, experim
         pbar = tqdm(enumerate(train_loader), total=len(train_loader),
                     desc=f"Epoch {e+1}/{args.max_epoch} [TRAIN]")
 
-        for i, (audio, pose_target, file_name) in pbar:
+        for i, (audio, pose_target, pose_lengths, audio_lengths, file_name) in pbar:
             audio = audio.to(device=args.device)
             pose_target = pose_target.to(device=args.device)
+            pose_lengths = pose_lengths.to(device=args.device)
 
             optimizer.zero_grad()
 
-            # passiamo la lunghezza reale delle pose al modello
-            predictions = model(audio, target_seq_len=pose_target.size(1))
+            # il modello interpola alla lunghezza reale massima del batch (non paddata)
+            predictions = model(audio, pose_lengths=pose_lengths)
 
-            # allinea la lunghezza (a volte differiscono di 1 frame)
-            min_seq_len = min(predictions.size(1), pose_target.size(1))
-            predictions = predictions[:, :min_seq_len, :]
-            pose_target_aligned = pose_target[:, :min_seq_len, :]
-
-            loss, pos_l, vel_l = criterion(predictions, pose_target_aligned)
+            # la loss usa la mask per ignorare i frame paddati di ogni campione
+            loss, pos_l, vel_l = criterion(predictions, pose_target, lengths=pose_lengths)
             loss.backward()
             optimizer.step()
 
@@ -143,18 +177,13 @@ def trainer(args, train_loader, dev_loader, model, optimizer, criterion, experim
         model.eval()
 
         with torch.no_grad():
-            for audio, pose_target, file_name in dev_loader:
+            for audio, pose_target, pose_lengths, audio_lengths, file_name in dev_loader:
                 audio = audio.to(device=args.device)
                 pose_target = pose_target.to(device=args.device)
+                pose_lengths = pose_lengths.to(device=args.device)
 
-                # passare target_seq_len anche in validation
-                predictions = model(audio, target_seq_len=pose_target.size(1))
-
-                min_seq_len = min(predictions.size(1), pose_target.size(1))
-                predictions = predictions[:, :min_seq_len, :]
-                pose_target_aligned = pose_target[:, :min_seq_len, :]
-
-                loss, pos_l, vel_l = criterion(predictions, pose_target_aligned)
+                predictions = model(audio, pose_lengths=pose_lengths)
+                loss, pos_l, vel_l = criterion(predictions, pose_target, lengths=pose_lengths)
                 valid_loss_log.append(loss.item())
                 valid_pos_loss_log.append(pos_l)
                 valid_vel_loss_log.append(vel_l)
@@ -242,16 +271,20 @@ def test(args, model, test_loader):
     model = model.to(torch.device(args.device))
     model.eval()
 
-    for audio, pose_target, file_name in tqdm(test_loader, desc="Testing"):
+    for audio, pose_target, pose_lengths, audio_lengths, file_names in tqdm(test_loader, desc="Testing"):
         audio = audio.to(device=args.device)
+        pose_lengths = pose_lengths.to(device=args.device)
 
-        # Genera predizione con la lunghezza del target (per confronto)
-        predictions = model(audio, target_seq_len=pose_target.size(1))
-        predictions = predictions.squeeze()  # Rimuove la dimensione del batch
+        # Genera predizioni per l'intero batch
+        predictions = model(audio, pose_lengths=pose_lengths)  # (B, max_real_len, 3)
 
-        # Salva la predizione come file .npy
-        save_name = os.path.join(result_path, file_name[0].replace(".wav", ".npy"))
-        np.save(save_name, predictions.detach().cpu().numpy())
+        # Salva ogni elemento del batch come file .npy separato,
+        # tagliando alla lunghezza reale (evita di salvare frame paddati a zero)
+        for i, fname in enumerate(file_names):
+            real_len = pose_lengths[i].item()
+            pred_i = predictions[i, :real_len, :]  # (real_len, 3)
+            save_name = os.path.join(result_path, fname.replace(".wav", ".npy"))
+            np.save(save_name, pred_i.detach().cpu().numpy())
 
     print(f"\n Test completato! Pose generate salvate in: {result_path}")
 
@@ -260,16 +293,38 @@ def main():
     args = get_args()
 
     # Inizializza Comet ML (l'API key verrà letta dalla variabile d'ambiente COMET_API_KEY)
-    experiment = comet_ml.Experiment(
-        project_name="audio2pose",
-        auto_metric_logging=True,
-        auto_param_logging=True,
-        auto_histogram_weight_logging=True,
-        auto_histogram_gradient_logging=True,
-        auto_histogram_activation_logging=True,
-    )
+    if args.comet_experiment_key:
+        print(f"Ripresa esperimento Comet ML: {args.comet_experiment_key}")
+        experiment = comet_ml.ExistingExperiment(
+            previous_experiment=args.comet_experiment_key,
+            project_name="audio2pose",
+            auto_metric_logging=True,
+            auto_param_logging=True,
+            auto_histogram_weight_logging=True,
+            auto_histogram_gradient_logging=True,
+            auto_histogram_activation_logging=True,
+        )
+    else:
+        experiment = comet_ml.Experiment(
+            project_name="audio2pose",
+            auto_metric_logging=True,
+            auto_param_logging=True,
+            auto_histogram_weight_logging=True,
+            auto_histogram_gradient_logging=True,
+            auto_histogram_activation_logging=True,
+        )
     # Rinomina l'esperimento per identificarlo facilmente sulla dashboard
-    experiment.set_name(f"vel_loss_{args.vel_loss_weight}_epochs_{args.max_epoch}")
+    auto_name = f"vel{args.vel_loss_weight}_L{args.num_layers}_h{args.hidden_dim}_ep{args.max_epoch}"
+    exp_name = args.exp_name if args.exp_name else auto_name
+    experiment.set_name(exp_name)
+    # Tag con gli iperparametri chiave per filtrare su CometML
+    experiment.add_tags([
+        f"layers={args.num_layers}",
+        f"hidden={args.hidden_dim}",
+        f"vel={args.vel_loss_weight}",
+        f"lr={args.lr}",
+        f"bs={args.batch_size}",
+    ])
     # Logga tutti gli argomenti (iperparametri, path, etc.)
     experiment.log_parameters(vars(args))
 
@@ -299,9 +354,20 @@ def main():
     # 4. Carica i dati
     dataset = get_dataloaders(args)
 
+    start_epoch = 0
+    if args.resume_checkpoint and os.path.exists(args.resume_checkpoint):
+        import re
+        print(f"\nCaricamento pesi dal checkpoint: {args.resume_checkpoint}")
+        # weights_only rimosso perché la versione py potremme non supportarlo o richiede default false in pytorch vecchi
+        model.load_state_dict(torch.load(args.resume_checkpoint, map_location=args.device))
+        match = re.search(r"epoch_(\d+)", args.resume_checkpoint)
+        if match:
+            start_epoch = int(match.group(1))
+            print(f"L'allenamento riprenderà dall'epoca {start_epoch}")
+
     # 5. Training
     model = trainer(args, dataset["train"], dataset["valid"],
-                    model, optimizer, criterion, experiment)
+                    model, optimizer, criterion, experiment, start_epoch)
 
     # 6. Test
     test(args, model, dataset["test"])

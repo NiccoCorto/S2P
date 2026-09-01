@@ -65,9 +65,13 @@ def predict_pose_from_audio(model, audio_path, device="cpu", target_frames=None)
     input_values = processor(speech_array, sampling_rate=16000).input_values
     audio_tensor = torch.FloatTensor(input_values).to(device)
 
-    # predizione
+    # predizione — il modello usa pose_lengths (LongTensor) per definire la lunghezza target
     with torch.no_grad():
-        predictions = model(audio_tensor, target_seq_len=target_frames)
+        if target_frames is not None:
+            pose_lengths = torch.LongTensor([target_frames]).to(device)
+        else:
+            pose_lengths = None
+        predictions = model(audio_tensor, pose_lengths=pose_lengths)
 
     return predictions.squeeze().cpu().numpy()
 
