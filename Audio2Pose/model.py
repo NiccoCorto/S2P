@@ -35,12 +35,15 @@ class HeadPosePredictor(nn.Module):
         for param in self.audio_encoder.parameters():
             param.requires_grad = False
 
+        self.num_speakers = getattr(args, "num_speakers", 0) if args else 0
+        input_size = 768 + self.num_speakers
+
         # Layer Normalization sull'input (stabilizza il training)
         self.layer_norm = nn.LayerNorm(768)
 
         # Layer temporale (LSTM bidirezionale)
         self.lstm = nn.LSTM(
-            input_size=768,
+            input_size=input_size,
             hidden_size=hidden_dim,
             num_layers=num_layers,
             batch_first=True,
@@ -54,7 +57,7 @@ class HeadPosePredictor(nn.Module):
         # output: 3 valori (Pitch, Yaw, Roll) — compatibili con cv2.Rodrigues()
         self.fc = nn.Linear(hidden_dim * 2, 3)  # *2 perché bidirezionale
 
-    def forward(self, audio_input, pose_lengths=None):
+    def forward(self, audio_input, pose_lengths=None, speaker_ids=None):
         """
         Args:
             audio_input:  Tensor audio raw (Batch, Samples) pre-processato da Wav2Vec2Processor
@@ -62,6 +65,7 @@ class HeadPosePredictor(nn.Module):
                           sequenza pose nel batch. Se specificato, le feature audio vengono
                           interpolate alla lunghezza del campione più lungo (max reale, non padded),
                           garantendo che frame paddati non vengano mai predetti né inclusi in loss.
+            speaker_ids:  LongTensor (Batch,) con gli ID univoci dei parlanti per il one-hot.
 
         Returns:
             pose_pred: (Batch, max_real_len, 3) — Pitch, Yaw, Roll per frame
@@ -86,6 +90,15 @@ class HeadPosePredictor(nn.Module):
                 features, size=target_len, mode='linear', align_corners=True
             )
             features = features.transpose(1, 2)  # (B, target_len, 768)
+
+        # Aggiunta One-Hot Encoder (se num_speakers > 0 e speaker_ids forniti)
+        if self.num_speakers > 0 and speaker_ids is not None:
+            # Crea vettore one-hot di dimensione (B, num_speakers)
+            one_hot = F.one_hot(speaker_ids, num_classes=self.num_speakers).float()
+            # Espandi per la dimensione temporale: (B, 1, num_speakers) -> (B, target_len, num_speakers)
+            one_hot_expanded = one_hot.unsqueeze(1).expand(-1, target_len, -1)
+            # Concatena lungo l'ultima dimensione
+            features = torch.cat([features, one_hot_expanded], dim=-1)
 
         # lstm
         lstm_out, _ = self.lstm(features)

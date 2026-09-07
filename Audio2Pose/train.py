@@ -144,15 +144,16 @@ def trainer(args, train_loader, dev_loader, model, optimizer, criterion, experim
         pbar = tqdm(enumerate(train_loader), total=len(train_loader),
                     desc=f"Epoch {e+1}/{args.max_epoch} [TRAIN]")
 
-        for i, (audio, pose_target, pose_lengths, audio_lengths, file_name) in pbar:
+        for i, (audio, pose_target, pose_lengths, audio_lengths, file_name, speaker_ids) in pbar:
             audio = audio.to(device=args.device)
             pose_target = pose_target.to(device=args.device)
             pose_lengths = pose_lengths.to(device=args.device)
+            speaker_ids = speaker_ids.to(device=args.device)
 
             optimizer.zero_grad()
 
             # il modello interpola alla lunghezza reale massima del batch (non paddata)
-            predictions = model(audio, pose_lengths=pose_lengths)
+            predictions = model(audio, pose_lengths=pose_lengths, speaker_ids=speaker_ids)
 
             # la loss usa la mask per ignorare i frame paddati di ogni campione
             loss, pos_l, vel_l = criterion(predictions, pose_target, lengths=pose_lengths)
@@ -177,12 +178,13 @@ def trainer(args, train_loader, dev_loader, model, optimizer, criterion, experim
         model.eval()
 
         with torch.no_grad():
-            for audio, pose_target, pose_lengths, audio_lengths, file_name in dev_loader:
+            for audio, pose_target, pose_lengths, audio_lengths, file_name, speaker_ids in dev_loader:
                 audio = audio.to(device=args.device)
                 pose_target = pose_target.to(device=args.device)
                 pose_lengths = pose_lengths.to(device=args.device)
+                speaker_ids = speaker_ids.to(device=args.device)
 
-                predictions = model(audio, pose_lengths=pose_lengths)
+                predictions = model(audio, pose_lengths=pose_lengths, speaker_ids=speaker_ids)
                 loss, pos_l, vel_l = criterion(predictions, pose_target, lengths=pose_lengths)
                 valid_loss_log.append(loss.item())
                 valid_pos_loss_log.append(pos_l)
@@ -271,12 +273,13 @@ def test(args, model, test_loader):
     model = model.to(torch.device(args.device))
     model.eval()
 
-    for audio, pose_target, pose_lengths, audio_lengths, file_names in tqdm(test_loader, desc="Testing"):
+    for audio, pose_target, pose_lengths, audio_lengths, file_names, speaker_ids in tqdm(test_loader, desc="Testing"):
         audio = audio.to(device=args.device)
         pose_lengths = pose_lengths.to(device=args.device)
+        speaker_ids = speaker_ids.to(device=args.device)
 
         # Genera predizioni per l'intero batch
-        predictions = model(audio, pose_lengths=pose_lengths)  # (B, max_real_len, 3)
+        predictions = model(audio, pose_lengths=pose_lengths, speaker_ids=speaker_ids)  # (B, max_real_len, 3)
 
         # Salva ogni elemento del batch come file .npy separato,
         # tagliando alla lunghezza reale (evita di salvare frame paddati a zero)
@@ -333,7 +336,21 @@ def main():
     print(f"   Device:   {args.device}")
     print(f"   Dati:     {args.data_dir}\n")
 
-    # 1. Costruisci il modello
+    import json
+    
+    # 1. Carica i dati (genererà speaker_mapping.json se non esiste in cache)
+    dataset = get_dataloaders(args)
+
+    map_file = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "speaker_mapping.json")
+    if os.path.exists(map_file):
+        with open(map_file, "r") as f:
+            speaker_map = json.load(f)
+        args.num_speakers = len(speaker_map)
+        print(f"   One-Hot Encoding attivato per {args.num_speakers} speaker")
+    else:
+        args.num_speakers = 0
+
+    # 2. Costruisci il modello
     model = HeadPosePredictor(args)
     model = model.to(torch.device(args.device))
 
@@ -342,17 +359,14 @@ def main():
     total = sum(p.numel() for p in model.parameters())
     print(f"   Parametri: {trainable:,} addestrabili / {total:,} totali\n")
 
-    # 2. Loss e Ottimizzatore
+    # 3. Loss e Ottimizzatore
     criterion = PoseLoss(vel_weight=args.vel_loss_weight)
     optimizer = torch.optim.Adam(
         filter(lambda p: p.requires_grad, model.parameters()),
         lr=args.lr
     )
 
-    # 3. (nessuno scheduler — LR fisso a 1e-4 per tutta la durata)
-
-    # 4. Carica i dati
-    dataset = get_dataloaders(args)
+    # (nessuno scheduler — LR fisso a 1e-4 per tutta la durata)
 
     start_epoch = 0
     if args.resume_checkpoint and os.path.exists(args.resume_checkpoint):
