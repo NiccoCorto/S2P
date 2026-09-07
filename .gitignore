@@ -57,7 +57,12 @@ evaluate_metrics.py
 generate_all_quantitative_folders.py
 generate_isolated_quantitative.py
 generate_quantitative_baseline.py
+generate_hdtf_quantitative_ep200.py
+render_single_chunk_ep200.py
+find_large_movements.py
 run_all_renders.sh
 run_overfit_experiments.sh
 run_resume_overfit_experiments.sh
 run_test_renders_1_to_4.sh
+run_HDTF_experiment.sh
+dataset_chunks/

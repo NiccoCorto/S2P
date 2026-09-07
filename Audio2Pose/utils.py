@@ -71,7 +71,7 @@ def predict_pose_from_audio(model, audio_path, device="cpu", target_frames=None)
             pose_lengths = torch.LongTensor([target_frames]).to(device)
         else:
             pose_lengths = None
-        predictions = model(audio_tensor, pose_lengths=pose_lengths)
+        predictions, _, _ = model(audio_tensor, pose_lengths=pose_lengths)
 
     return predictions.squeeze().cpu().numpy()
 
