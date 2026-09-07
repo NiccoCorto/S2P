@@ -23,63 +23,69 @@ from model import HeadPosePredictor
 
 class PoseLoss(nn.Module):
     """
-    Funzione di errore personalizzata per la testa.
-    Calcola l'errore sulla posizione esatta (MSE) + l'errore sulla velocità
-    del movimento (per renderlo fluido e naturale).
-
-    Supporta una padding mask tramite il parametro `lengths`: i frame paddati
-    (oltre la lunghezza reale di ciascun campione) vengono completamente ignorati
-    sia nella pos_loss che nella vel_loss, evitando che il modello impari a predire
-    zero sui frame di padding (loss poisoning).
+    Funzione di errore personalizzata per la testa (Vertex Loss / Face Loss).
+    Invece di calcolare l'errore sugli angoli, carica un template 3D della faccia,
+    applica matematicamente le rotazioni (Forward Kinematics) e calcola l'errore
+    (sia di posizione che di velocità) sull'esatta distanza spaziale dei 5023 vertici.
     """
-    def __init__(self, vel_weight=2.0):
+    def __init__(self, vel_weight=2.0, canonical_face_path="canonical_face.npy"):
         super(PoseLoss, self).__init__()
         self.vel_weight = vel_weight
+        # Carica il template della faccia (N_points, 3) come tensore buffer
+        self.register_buffer("canonical_face", torch.tensor(np.load(canonical_face_path), dtype=torch.float32))
 
     def forward(self, predictions, target, lengths=None):
         """
         Args:
-            predictions: Tensor (B, T, 3) — predizioni del modello
-            target:      Tensor (B, T, 3) — pose target (eventualmente paddate a zero)
-            lengths:     LongTensor (B,)  — lunghezza reale di ogni sequenza.
-                         Se None, tutti i frame sono considerati reali (no mask).
+            predictions: Tensor (B, T, 3) — predizioni axis-angle
+            target:      Tensor (B, T, 3) — pose target axis-angle
+            lengths:     LongTensor (B,)  — lunghezza reale di ogni sequenza
         """
+        from Audio2Pose.geometry import axis_angle_to_matrix
+        
         B, T, C = target.shape
 
-        # costruisce mask frame-level: True dove il frame è reale (non padding)
+        # Costruisce la maschera (True dove il frame è reale)
         if lengths is not None:
             idx = torch.arange(T, device=target.device).unsqueeze(0)  # (1, T)
             mask_2d = idx < lengths.unsqueeze(1)                       # (B, T)
         else:
             mask_2d = torch.ones(B, T, dtype=torch.bool, device=target.device)
 
-        # --- Position Loss: MSE solo sui frame reali ---
-        mask_3d = mask_2d.unsqueeze(-1).expand_as(target)  # (B, T, 3)
-        pred_masked = predictions[mask_3d].view(-1, C)
-        tgt_masked  = target[mask_3d].view(-1, C)
+        # 1. Converte angoli in Matrici di Rotazione (B, T, 3, 3)
+        R_pred = axis_angle_to_matrix(predictions)
+        R_target = axis_angle_to_matrix(target)
+
+        # 2. Forward Kinematics: Ruota la faccia canonica
+        # canonical_face: (N, 3). Vogliamo V_pred: (B, T, N, 3)
+        # Assicuriamoci che il template sia sulla stessa GPU
+        canonical_face = self.canonical_face.to(target.device)
+        # Moltiplichiamo Nx3 per la trasposta della rotazione (3x3)
+        V_pred = torch.matmul(canonical_face, R_pred.transpose(-1, -2))
+        V_target = torch.matmul(canonical_face, R_target.transpose(-1, -2))
+
+        # --- Position Loss: MSE sui 5023 vertici ---
+        mask_4d = mask_2d.unsqueeze(-1).unsqueeze(-1).expand_as(V_target) # (B, T, N, 3)
+        pred_masked = V_pred[mask_4d].view(-1, 3)
+        tgt_masked  = V_target[mask_4d].view(-1, 3)
         pos_loss = F.mse_loss(pred_masked, tgt_masked)
 
-        # --- Velocity Loss: differenze consecutive calcolate prima di appiattire ---
-        # (così non si mescolano frame di sequenze diverse)
-        pred_vel = predictions[:, 1:, :] - predictions[:, :-1, :]  # (B, T-1, C)
-        tgt_vel  = target[:, 1:, :] - target[:, :-1, :]            # (B, T-1, C)
-        # valido solo dove ENTRAMBI i frame consecutivi sono reali
-        vel_mask    = mask_2d[:, 1:] & mask_2d[:, :-1]             # (B, T-1)
-        vel_mask_3d = vel_mask.unsqueeze(-1).expand_as(pred_vel)   # (B, T-1, C)
-
-        if vel_mask_3d.any():
-            pred_vel_m = pred_vel[vel_mask_3d].view(-1, C)
-            tgt_vel_m  = tgt_vel[vel_mask_3d].view(-1, C)
+        # --- Velocity Loss: Differenza 3D tra vertici di frame consecutivi ---
+        pred_vel = V_pred[:, 1:] - V_pred[:, :-1]  # (B, T-1, N, 3)
+        tgt_vel  = V_target[:, 1:] - V_target[:, :-1]
+        
+        vel_mask = mask_2d[:, 1:] & mask_2d[:, :-1]
+        vel_mask_4d = vel_mask.unsqueeze(-1).unsqueeze(-1).expand_as(pred_vel)
+        
+        if vel_mask_4d.any():
+            pred_vel_m = pred_vel[vel_mask_4d].view(-1, 3)
+            tgt_vel_m  = tgt_vel[vel_mask_4d].view(-1, 3)
             vel_loss = F.mse_loss(pred_vel_m, tgt_vel_m)
         else:
             vel_loss = torch.tensor(0.0, device=target.device)
 
-        # sommiamo gli errori con il peso configurato
-        # vel_weight=0 disabilita la velocity loss (solo pos_loss)
-        # vel_weight=2044 standardizza la vel_loss per avere la stessa magnitudo di pos_loss
         total_loss = pos_loss + (self.vel_weight * vel_loss)
 
-        # ritorniamo anche i valori grezzi (non pesati) per il logging
         return total_loss, pos_loss.detach().item(), vel_loss.detach().item()
 
 
@@ -144,7 +150,7 @@ def trainer(args, train_loader, dev_loader, model, optimizer, criterion, experim
         pbar = tqdm(enumerate(train_loader), total=len(train_loader),
                     desc=f"Epoch {e+1}/{args.max_epoch} [TRAIN]")
 
-        for i, (audio, pose_target, pose_lengths, audio_lengths, file_name) in pbar:
+        for i, (audio, pose_target, pose_lengths, audio_lengths, file_name, *_) in pbar:
             audio = audio.to(device=args.device)
             pose_target = pose_target.to(device=args.device)
             pose_lengths = pose_lengths.to(device=args.device)
@@ -177,7 +183,7 @@ def trainer(args, train_loader, dev_loader, model, optimizer, criterion, experim
         model.eval()
 
         with torch.no_grad():
-            for audio, pose_target, pose_lengths, audio_lengths, file_name in dev_loader:
+            for audio, pose_target, pose_lengths, audio_lengths, file_name, *_ in dev_loader:
                 audio = audio.to(device=args.device)
                 pose_target = pose_target.to(device=args.device)
                 pose_lengths = pose_lengths.to(device=args.device)
@@ -271,7 +277,7 @@ def test(args, model, test_loader):
     model = model.to(torch.device(args.device))
     model.eval()
 
-    for audio, pose_target, pose_lengths, audio_lengths, file_names in tqdm(test_loader, desc="Testing"):
+    for audio, pose_target, pose_lengths, audio_lengths, file_names, *_ in tqdm(test_loader, desc="Testing"):
         audio = audio.to(device=args.device)
         pose_lengths = pose_lengths.to(device=args.device)
 
