@@ -138,7 +138,22 @@ def evaluate_single_sample(pred_pose, sample_name, dataset_dir, label="Sample"):
     if os.path.exists(vert_static_path) and os.path.exists(vert_gt_path):
         vert_static = np.load(vert_static_path)[:n_frames]
         vert_gt = np.load(vert_gt_path)[:n_frames]
-        
+    else:
+        # Fallback per dataset HDTF: usa canonical_face.npy
+        canonical_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "canonical_face.npy")
+        if os.path.exists(canonical_path):
+            canonical_face = np.load(canonical_path)
+            vert_static = np.tile(canonical_face, (n_frames, 1, 1))
+            
+            # Genera vert_gt ruotando la faccia canonica con la GT pose
+            vert_gt = np.zeros_like(vert_static)
+            for i in range(n_frames):
+                vert_gt[i] = apply_rotation_to_vertices(canonical_face, gt_pose[i], use_origin=True)
+        else:
+            vert_static = None
+            vert_gt = None
+
+    if vert_static is not None and vert_gt is not None:
         # Applica le pose predette ai vertici statici
         pred_verts = np.zeros_like(vert_static)
         for i in range(n_frames):
