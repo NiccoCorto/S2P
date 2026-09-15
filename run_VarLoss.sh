@@ -36,12 +36,12 @@ BATCH_SIZE=4
 PATIENCE=200
 
 # Pesi della loss
-# - vel_loss_weight: 0.0 = disabilitata (FaceLoss con sola posizione)
-#   Per abilitare: provare 1.0 o normalizzato (~velocità sui vertici)
-# - var_loss_weight: peso della VarLoss. Partire da 1.0 e aumentare se la faccia
-#   rimane statica. Provare: 1.0, 5.0, 10.0
+# - vel_loss_weight=1.0: velocity loss nello spazio dei vertici (peso bilanciato)
+# - var_loss_weight=5.0: VarLoss ha peso più alto perché la varianza è numericamente
+#   più piccola della pos_loss; 5x dà abbastanza influenza sul gradiente.
+#   Se la faccia è ancora troppo statica, aumentare a 10.0 o 50.0.
 VEL_LOSS_WEIGHT=1.0
-VAR_LOSS_WEIGHT=1.0
+VAR_LOSS_WEIGHT=5.0
 
 # Crea cartelle output
 mkdir -p "${SAVE_PATH}" "${RESULT_PATH}" "${LOG_PATH}"
