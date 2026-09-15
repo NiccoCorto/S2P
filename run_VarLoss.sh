@@ -17,6 +17,14 @@
 
 set -e
 
+# Setup ambiente e Comet ML
+export COMET_API_KEY="${COMET_API_KEY:-7UuGcSnsZJc4BxmczoZdm8O1j}"
+if [ -z "$CONDA_DEFAULT_ENV" ] || [ "$CONDA_DEFAULT_ENV" != "scantalk" ]; then
+    if [ -f "/mnt/diskone-second/ncortini/miniconda3/bin/activate" ]; then
+        source /mnt/diskone-second/ncortini/miniconda3/bin/activate scantalk
+    fi
+fi
+
 # --- Configurazione ---
 EXP_NAME="exp10_VarLoss"
 DATA_DIR="/mnt/diskone-second/DiffPoseTalk/datasets/HDTF_TFHP_Elaborated_Pose"
