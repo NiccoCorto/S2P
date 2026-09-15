@@ -31,9 +31,9 @@ DROPOUT=0.1
 
 # Iperparametri training
 LR=0.0001
-MAX_EPOCH=200
+MAX_EPOCH=100
 BATCH_SIZE=4
-PATIENCE=200
+PATIENCE=100
 
 # Pesi della loss
 # - vel_loss_weight=1.0: velocity loss nello spazio dei vertici (peso bilanciato)

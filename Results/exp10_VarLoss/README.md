@@ -128,8 +128,8 @@ total = pos_loss + vel_weight × vel_loss + var_weight × var_loss
 | `dropout` | 0.1 | Invariato da DiffPoseData |
 | `lr` | 1e-4 | Fisso, nessuno scheduler |
 | `batch_size` | 4 | Invariato |
-| `max_epoch` | 200 | Invariato |
-| `patience` | 200 | Early stopping disabilitato di fatto |
+| `max_epoch` | 100 | Invariato |
+| `patience` | 100 | Early stopping disabilitato di fatto |
 | **`vel_loss_weight`** | **1.0** | Peso della velocity loss sui vertici |
 | **`var_loss_weight`** | **5.0** | Peso della VarLoss — più aggressivo per combattere la staticità |
 
