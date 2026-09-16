@@ -74,7 +74,7 @@ if [ -f "s2p_lazy_cache.pkl" ]; then
     echo ""
 fi
 
-python Audio2Pose/train.py \
+python -u Audio2Pose/train.py \
     --mode ssh \
     --data_dir "${DATA_DIR}" \
     --save_path "${SAVE_PATH}" \
