@@ -128,7 +128,9 @@ class HeadPosePredictor(nn.Module):
             features = features.transpose(1, 2)  # (B, target_len, 768)
 
         # Aggiunta condizionamento speaker tramite One-Hot / Vettore Uniforme
-        if self.num_speakers > 0 and speaker_ids is not None:
+        if self.num_speakers > 0:
+            if speaker_ids is None:
+                speaker_ids = torch.full((features.size(0),), -1, dtype=torch.long, device=features.device)
             speaker_vec = self._build_speaker_vector(speaker_ids, target_len)
             # Concatena lungo l'ultima dimensione: (B, target_len, 768 + num_speakers)
             features = torch.cat([features, speaker_vec], dim=-1)

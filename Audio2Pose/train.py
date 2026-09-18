@@ -307,8 +307,8 @@ def log_epoch(csv_path, epoch,
         writer = csv.writer(f)
         writer.writerow([
             epoch,
-            f"{train_loss:.8f}", f"{train_pos:.8f}", f"{train_vel:.8f}", f"{train_var:.8f}",
-            f"{val_loss:.8f}",   f"{val_pos:.8f}",   f"{val_vel:.8f}",   f"{val_var:.8f}",
+            f"{train_loss:.8f}", f"{train_pos:.8f}", f"{train_vel:.8e}", f"{train_var:.8e}",
+            f"{val_loss:.8f}",   f"{val_pos:.8f}",   f"{val_vel:.8e}",   f"{val_var:.8e}",
             f"{lr:.8f}", "best" if is_best else ""
         ])
 
@@ -377,8 +377,8 @@ def trainer(args, train_loader, dev_loader, model, optimizer, criterion, experim
             pbar.set_postfix({
                 "Loss": f"{np.mean(loss_log):.6f}",
                 "Pos":  f"{np.mean(pos_loss_log):.6f}",
-                "Vel":  f"{np.mean(vel_loss_log):.8f}",
-                "Var":  f"{np.mean(var_loss_log):.8f}"
+                "Vel":  f"{np.mean(vel_loss_log):.2e}",
+                "Var":  f"{np.mean(var_loss_log):.2e}"
             })
 
         train_loss     = np.mean(loss_log)
@@ -448,9 +448,9 @@ def trainer(args, train_loader, dev_loader, model, optimizer, criterion, experim
         best_marker = " ★ BEST" if is_best else ""
         print(f"  Epoca {e+1}/{args.max_epoch} | "
               f"Train: {train_loss:.6f} "
-              f"(Pos: {train_pos_loss:.6f} | Vel: {train_vel_loss:.8f} | Var: {train_var_loss:.8f}) | "
+              f"(Pos: {train_pos_loss:.6f} | Vel: {train_vel_loss:.2e} | Var: {train_var_loss:.2e}) | "
               f"Val: {val_loss:.6f} "
-              f"(Pos: {val_pos_loss:.6f} | Vel: {val_vel_loss:.8f} | Var: {val_var_loss:.8f}) | "
+              f"(Pos: {val_pos_loss:.6f} | Vel: {val_vel_loss:.2e} | Var: {val_var_loss:.2e}) | "
               f"LR: {current_lr:.2e} | "
               f"Patience: {patience_counter}/{args.patience}{best_marker}")
 

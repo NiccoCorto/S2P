@@ -161,8 +161,8 @@ def merge_side_by_side(left_video, right_video, output_path, label_left="GT", la
     cmd = (
         f'/usr/bin/ffmpeg -y '
         f'-i {left_video} -i {right_video} '
-        f'-filter_complex "[0:v]drawtext=text={label_left}:fontsize=40:fontcolor=black:'
-        f'x=10:y=10[l];[1:v]drawtext=text={label_right}:fontsize=40:fontcolor=black:'
+        f'-filter_complex "[0:v]drawtext=text=\'{label_left}\':fontsize=40:fontcolor=black:'
+        f'x=10:y=10[l];[1:v]drawtext=text=\'{label_right}\':fontsize=40:fontcolor=black:'
         f'x=10:y=10[r];[l][r]hstack=inputs=2[v]" '
         f'-map "[v]" -map 0:a '
         f'-c:v h264 -c:a copy {output_path}'
