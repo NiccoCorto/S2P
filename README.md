@@ -25,8 +25,6 @@ The project explores several architectural variants and loss functions across mu
 
 ## Architecture
 
-![S2P Pipeline](img/pipeline_diagram.jpg)
-
 The model (`HeadPosePredictor`) is composed of:
 
 | Component | Details |
@@ -66,20 +64,6 @@ The project is organized as a series of progressive experiments, each investigat
 | EXP11–12 | VarLoss | Temporal variance penalty on 3D vertices | Partial improvement; stochasticity requires generative models |
 
 > **Key takeaway:** L2-based deterministic models inevitably collapse to the conditional mean on stochastic one-to-many mappings. Solving this requires generative approaches (VAE, Diffusion Models) or adversarial losses (GAN).
-
-### Qualitative Results
-
-#### EXP4 — Baseline LSTM (MSE on angles)
-![EXP4 Qualitative Grid](img/Exp4/EXP4_qualitative_grid.png)
-
-#### EXP10 — FaceLoss (MSE on 3D vertices)
-![EXP10 Qualitative Grid](img/Exp10/EXP10_qualitative_grid.png)
-
-#### EXP11 — VarLoss (temporal variance penalty)
-![EXP11 Qualitative Grid](img/Exp11/EXP11_qualitative_grid.png)
-
-#### EXP12 — VarLoss + MeshVelLoss
-![EXP12 Qualitative Grid](img/Exp12/EXP12_qualitative_grid.png)
 
 ---
 
