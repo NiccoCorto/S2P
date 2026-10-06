@@ -104,17 +104,9 @@ S2P/
 │   └── utils.py              # Shared utilities
 ├── config.py                 # Centralized hyperparameters (argparse)
 ├── data_loader.py            # Dataset loading, preprocessing, batching
-├── eval_hdtf_testset.py      # Quantitative evaluation on HDTF test set
-├── eval_mead_testset.py      # Quantitative evaluation on MEAD-EMOTE test set
 ├── render_no_scantalk.py     # Rendering pipeline (pure rotation, no ScanTalk dependency)
 ├── speaker_mapping.json      # HDTF speaker ID → One-Hot index (587 speakers)
-├── canonical_face.npy        # FLAME canonical face template (5023 vertices)
-├── Results/
-│   ├── EXP4/ … EXP12/        # Per-experiment predictions, metrics, READMEs
-│   └── Presentazione/        # Summary materials
-├── Saves/                    # Model checkpoints (.pth)
-├── Logs/                     # Training CSV logs
-└── run_experiments.sh        # Shell scripts for launching experiment batches
+└── canonical_face.npy        # FLAME canonical face template (5023 vertices)
 ```
 
 ---
