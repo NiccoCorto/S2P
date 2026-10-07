@@ -59,19 +59,61 @@ Predicted rotations are represented as **axis-angle vectors**, converted to rota
 
 ## Experiments
 
-The project is organized as a series of progressive experiments, each investigating a specific architectural or loss design choice:
+The project is organized as a series of progressive experiments, each investigating a specific architectural or loss design choice across dedicated branches:
 
-| Exp | Name | Key Change | Main Finding |
-|---|---|---|---|
-| EXP4 | Baseline LSTM | Standard MSE on angles | Regression to mean, static output |
-| EXP5 | Architecture Search | 2–4 LSTM layers, hidden 256/512 | No significant gain from depth alone |
-| EXP6 | Overfitting Study | Deliberate overfit on small set | Confirms the model can learn dynamics if forced |
-| EXP7–8 | Velocity Loss | Angular velocity regularization | Reduced jitter; staticness persists |
-| EXP9 | One-Hot Conditioning | Speaker identity as conditioning signal | Identity acts as static bias, not dynamic style |
-| EXP10 | FaceLoss | MSE on 3D face vertices (FLAME topology) instead of raw angles | More accurate spatial mean; dynamic variance still collapsed |
-| EXP11–12 | VarLoss | Temporal variance penalty on 3D vertices | Partial improvement; stochasticity requires generative models |
+| Exp | Branch | Name | Key Change | Main Finding |
+|---|---|---|---|---|
+| EXP4 | `main` | Baseline LSTM | Standard MSE on angles | Regression to mean, static output |
+| EXP5 | `main` | Architecture Search | 2–4 LSTM layers, hidden 256/512 | No significant gain from depth alone |
+| EXP6 | `main` | Overfitting Study | Deliberate overfit on small set | Confirms the model can learn dynamics if forced |
+| EXP7–8 | `main` | Velocity Loss | Angular velocity regularization | Reduced jitter; staticness persists |
+| EXP9 | `DiffPoseData` | One-Hot Conditioning | Speaker identity as conditioning signal (587 speakers) | Identity acts as static bias, not dynamic style |
+| EXP10 | `FaceLoss-Approach` | FaceLoss | MSE on 3D face vertices (FLAME topology) instead of raw angles | More accurate spatial mean; dynamic variance still collapsed |
+| EXP11–12 | `VarLoss` | VarLoss | Temporal variance penalty on 3D vertices | Partial improvement; stochasticity requires generative models |
+| VAE Study | `One-to-many-approach` | Probabilistic VAE | Latent space $Z$, KLD loss & annealing | Posterior collapse under MSE; motivates diffusion/GANs |
 
 > **Key takeaway:** L2-based deterministic models inevitably collapse to the conditional mean on stochastic one-to-many mappings. Solving this requires generative approaches (VAE, Diffusion Models) or adversarial losses (GAN).
+
+---
+
+## Repository Branches
+
+Due to the exploratory nature of this research across multiple loss formulations and modeling paradigms, development is organized across several dedicated branches. Each branch isolates a specific methodological development:
+
+```
+main (Baseline MSE, MEAD-EMOTE eval, thesis report)
+  │
+  ├── FaceLoss-Approach (3D mesh vertex loss via Rodrigues FK)
+  │
+  └── DiffPoseData (HDTF dataset format, One-Hot speaker conditioning)
+        │
+        ├── One-to-many-approach (Probabilistic VAE exploration & Posterior Collapse study)
+        │
+        └── VarLoss (FaceLoss + One-Hot + Temporal Variance Regularization)
+```
+
+### Branch Guide
+
+| Branch | Primary Focus | Key Novelty / Features | Associated Experiments |
+|---|---|---|---|
+| [`main`](https://github.com/NiccoCorto/S2P/tree/main) | **Baseline & Benchmark** | Unified evaluation pipeline on MEAD-EMOTE, thesis report (`SpeechToPose.pdf`), baseline BiLSTM | EXP4 – EXP8 |
+| [`FaceLoss-Approach`](https://github.com/NiccoCorto/S2P/tree/FaceLoss-Approach) | **Geometric 3D Loss** | Replaces angular MSE with 3D Forward Kinematics on FLAME canonical face mesh (5,023 vertices) via Rodrigues formula (`geometry.py`) | EXP10 |
+| [`DiffPoseData`](https://github.com/NiccoCorto/S2P/tree/DiffPoseData) | **Dataset & Speaker Conditioning** | Adaptation to HDTF dataset (DiffPose/TFHP format); speaker identity conditioning via One-Hot vectors (587 speakers); ScanTalk rendering integration | EXP9 |
+| [`VarLoss`](https://github.com/NiccoCorto/S2P/tree/VarLoss) | **Variance Regularization** | Combines FaceLoss + One-Hot with temporal variance penalty (`VarLoss` / `VarLossSTD`) to prevent static pose collapse; uniform $1/N$ prior fallback for unseen test speakers | EXP10 – EXP12 |
+| [`One-to-many-approach`](https://github.com/NiccoCorto/S2P/tree/One-to-many-approach) | **Generative VAE Paradigm** | Explores probabilistic synthesis with a Variational Autoencoder (Pose Encoder, latent $Z$, KL Divergence loss with annealing); documents the *Posterior Collapse* challenge | VAE Study |
+
+### Branch Details
+
+- **`main`**: The primary reference branch. Contains the clean baseline architecture, dataset preprocessing, full quantitative evaluation suite on the MEAD-EMOTE dataset (`eval_mead_testset.py`), qualitative demo renderer, and the project thesis report (`SpeechToPose.pdf`).
+- **`FaceLoss-Approach`**: Addresses the non-linearity and metric distortion of Euler / axis-angle MSE. By rotating a static 3D canonical face mesh (`canonical_face.npy`) with predicted and target rotation matrices, loss gradients reflect true spatial Euclidean displacements rather than raw angle errors. Detailed rationale is documented in `face_loss_approach.md`.
+- **`DiffPoseData`**: Ports the pipeline to the full HDTF dataset with DiffPose formatting conventions. Implements speaker-dependent conditioning using 587 one-hot speaker vectors (`speaker_mapping.json`), testing whether speaker identity alone can resolve stylistic motion ambiguities.
+- **`VarLoss`**: Extends the FaceLoss formulation by adding an explicit penalty on temporal variance discrepancies on 3D vertices between prediction and ground truth. It features calibrated loss weights ($w_{\text{vel}}$, $w_{\text{var}}$) and handles unknown speakers gracefully during test-time inference with a uniform $1/N$ prior.
+- **`One-to-many-approach`**: Investigates the transition from deterministic regression to probabilistic generative modeling. Introduces a VAE framework to sample diverse motion trajectories from a standard normal latent space $Z \sim \mathcal{N}(0, I)$. Empirically demonstrates how standard reconstruction losses cause posterior collapse in speech-to-pose regression (detailed in `analisi_deterministico_vs_probabilistico.md`), underscoring the necessity of diffusion models or adversarial (GAN) objectives.
+
+To switch to any branch locally:
+```bash
+git checkout <branch-name>
+```
 
 ---
 
