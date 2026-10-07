@@ -9,6 +9,14 @@
 
 ---
 
+## Demo — Ground Truth vs. Prediction
+Side-by-side qualitative comparison on the test sequence `RD_AmandaStuck_000_chunk0` (16 seconds):
+- **Left (GT)**: Ground Truth head pose (real human dynamics from HDTF dataset)
+- **Right (Prediction)**: S2P predicted head pose (FLAME 3D mesh rendering)   
+
+https://github.com/user-attachments/assets/c3dd8f4b-07cb-4466-a86e-51d802003b37
+
+
 ## Overview
 
 **S2P** is a research project for **audio-driven head pose prediction**: given a raw speech waveform, the model predicts the temporal sequence of 3D head rotations (Pitch, Yaw, Roll) frame by frame.
