@@ -1,15 +1,15 @@
-# S2P — Speech-to-Head-Pose
+# S2P, Speech-to-Head-Pose
 
 ![Python](https://img.shields.io/badge/Python-3.10+-3776AB?logo=python&logoColor=white)
 ![PyTorch](https://img.shields.io/badge/PyTorch-2.x-EE4C2C?logo=pytorch&logoColor=white)
 ![Wav2Vec2](https://img.shields.io/badge/Wav2Vec2-facebook%2Fwav2vec2--base--960h-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
-> **Research project** — MICC (Media Integration and Communication Center), Università degli Studi di Firenze. Remote collaboration, A.A. 2025/2026.
+> **Research project**, MICC (Media Integration and Communication Center), Università degli Studi di Firenze. Remote collaboration, A.A. 2025/2026.
 
 ---
 
-## Demo — Ground Truth vs. Prediction
+## Demo, Ground Truth vs. Prediction
 Side-by-side qualitative comparison on the test sequence `RD_AmandaStuck_000_chunk0` (16 seconds):
 - **Left (GT)**: Ground Truth head pose (real human dynamics from HDTF dataset)
 - **Right (Prediction)**: S2P predicted head pose (FLAME 3D mesh rendering)   
@@ -27,7 +27,7 @@ The core pipeline follows a deterministic approach:
 Raw Audio (WAV) → Wav2Vec2 (frozen) → Bidirectional LSTM → FC → (Pitch, Yaw, Roll) per frame
 ```
 
-The project explores several architectural variants and loss functions across multiple experiments, systematically investigating the **One-to-Many problem** — a fundamental challenge in audio-driven head motion synthesis where the same phonetic content can correspond to arbitrarily different head movements.
+The project explores several architectural variants and loss functions across multiple experiments, systematically investigating the **One-to-Many problem**, a fundamental challenge in audio-driven head motion synthesis where the same phonetic content can correspond to arbitrarily different head movements.
 
 ---
 
@@ -37,7 +37,7 @@ The model (`HeadPosePredictor`) is composed of:
 
 | Component | Details |
 |---|---|
-| **Audio Encoder** | `facebook/wav2vec2-base-960h` — fully frozen (no fine-tuning) |
+| **Audio Encoder** | `facebook/wav2vec2-base-960h`, fully frozen (no fine-tuning) |
 | **Layer Norm** | Applied on the 768-dim Wav2Vec2 output features |
 | **Temporal Alignment** | Linear interpolation to match pose frame rate |
 | **Sequence Model** | Bidirectional LSTM (hidden: 256, layers: 2) |
@@ -96,10 +96,10 @@ main (Baseline MSE, MEAD-EMOTE eval, thesis report)
 
 | Branch | Primary Focus | Key Novelty / Features | Associated Experiments |
 |---|---|---|---|
-| [`main`](https://github.com/NiccoCorto/S2P/tree/main) | **Baseline & Benchmark** | Unified evaluation pipeline on MEAD-EMOTE, thesis report (`SpeechToPose.pdf`), baseline BiLSTM | EXP4 – EXP8 |
+| [`main`](https://github.com/NiccoCorto/S2P/tree/main) | **Baseline & Benchmark** | Unified evaluation pipeline on MEAD-EMOTE, thesis report (`SpeechToPose.pdf`), baseline BiLSTM | EXP4–EXP8 |
 | [`FaceLoss-Approach`](https://github.com/NiccoCorto/S2P/tree/FaceLoss-Approach) | **Geometric 3D Loss** | Replaces angular MSE with 3D Forward Kinematics on FLAME canonical face mesh (5,023 vertices) via Rodrigues formula (`geometry.py`) | EXP10 |
 | [`DiffPoseData`](https://github.com/NiccoCorto/S2P/tree/DiffPoseData) | **Dataset & Speaker Conditioning** | Adaptation to HDTF dataset (DiffPose/TFHP format); speaker identity conditioning via One-Hot vectors (587 speakers); ScanTalk rendering integration | EXP9 |
-| [`VarLoss`](https://github.com/NiccoCorto/S2P/tree/VarLoss) | **Variance Regularization** | Combines FaceLoss + One-Hot with temporal variance penalty (`VarLoss` / `VarLossSTD`) to prevent static pose collapse; uniform $1/N$ prior fallback for unseen test speakers | EXP10 – EXP12 |
+| [`VarLoss`](https://github.com/NiccoCorto/S2P/tree/VarLoss) | **Variance Regularization** | Combines FaceLoss + One-Hot with temporal variance penalty (`VarLoss` / `VarLossSTD`) to prevent static pose collapse; uniform $1/N$ prior fallback for unseen test speakers | EXP10–EXP12 |
 | [`One-to-many-approach`](https://github.com/NiccoCorto/S2P/tree/One-to-many-approach) | **Generative VAE Paradigm** | Explores probabilistic synthesis with a Variational Autoencoder (Pose Encoder, latent $Z$, KL Divergence loss with annealing); documents the *Posterior Collapse* challenge | VAE Study |
 
 ### Branch Details
@@ -122,10 +122,10 @@ git checkout <branch-name>
 | Loss | Description |
 |---|---|
 | **PosLoss** | MSE on predicted vs. ground-truth angles (Pitch, Yaw, Roll) |
-| **VelLoss** | MSE on angular velocity (inter-frame difference) — reduces jitter |
-| **FaceLoss** | MSE on 3D vertex positions (Forward Kinematics on FLAME canonical mesh) — geometrically meaningful gradients |
-| **MeshVelLoss** | MSE on inter-frame 3D vertex displacement — visual jitter reduction |
-| **VarLoss** | Penalizes mismatch between predicted and GT temporal variance on 3D vertices — encourages dynamic output |
+| **VelLoss** | MSE on angular velocity (inter-frame difference), reduces jitter |
+| **FaceLoss** | MSE on 3D vertex positions (Forward Kinematics on FLAME canonical mesh), geometrically meaningful gradients |
+| **MeshVelLoss** | MSE on inter-frame 3D vertex displacement, visual jitter reduction |
+| **VarLoss** | Penalizes mismatch between predicted and GT temporal variance on 3D vertices, encourages dynamic output |
 
 ---
 
@@ -135,7 +135,7 @@ git checkout <branch-name>
 |---|---|---|
 | **MAE (Pitch/Yaw/Roll)** | degrees | Mean Absolute Error on individual rotation axes |
 | **MAE Total** | degrees | Average MAE across all three axes |
-| **MVE** | mm | Mean Vertex Error — average 3D distance of predicted vs. GT face vertices |
+| **MVE** | mm | Mean Vertex Error, average 3D distance of predicted vs. GT face vertices |
 | **VelMAE** | rad/frame | Temporal smoothness error on rotation velocity |
 | **VelMesh** | m/frame | Temporal smoothness error on vertex displacement |
 
@@ -165,11 +165,11 @@ S2P/
 
 - Python 3.10+
 - PyTorch 2.x with CUDA support (recommended)
-- `transformers` (HuggingFace) — for Wav2Vec2
-- `librosa`, `soundfile` — audio I/O
+- `transformers` (HuggingFace), for Wav2Vec2
+- `librosa`, `soundfile`, audio I/O
 - `numpy`, `tqdm`
-- `comet_ml` — experiment tracking (optional, required only for training)
-- `open3d` or equivalent — for rendering (optional)
+- `comet_ml`, experiment tracking (optional, required only for training)
+- `open3d` or equivalent, for rendering (optional)
 
 Install dependencies:
 ```bash
@@ -248,4 +248,4 @@ python Audio2Pose/train.py \
 
 ## Author
 
-Developed as a research internship project at **MICC — Media Integration and Communication Center**, Università degli Studi di Firenze, A.A. 2025/2026 (remote collaboration).
+Developed as a research internship project at **MICC, Media Integration and Communication Center**, Università degli Studi di Firenze, A.A. 2025/2026 (remote collaboration).
