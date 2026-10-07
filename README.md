@@ -1,4 +1,4 @@
-# S2P, Speech-to-Head-Pose
+# S2P - Speech-to-Head-Pose
 
 ![Python](https://img.shields.io/badge/Python-3.10+-3776AB?logo=python&logoColor=white)
 ![PyTorch](https://img.shields.io/badge/PyTorch-2.x-EE4C2C?logo=pytorch&logoColor=white)
